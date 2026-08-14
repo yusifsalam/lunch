@@ -1,0 +1,12 @@
+---
+import Layout from "@/layouts/Layout.astro";
+import SessionView from "@/components/SessionView.tsx";
+import { service } from "@/lib/service";
+
+const user = Astro.locals.user;
+const initial = await service.snapshot(user.name);
+---
+
+<Layout title="Lunch">
+  <SessionView client:load initial={initial} user={user} />
+</Layout>

@@ -1,0 +1,246 @@
+---
+import Layout from "@/layouts/Layout.astro";
+import { actions } from "astro:actions";
+import { db } from "@/db/db";
+
+const user = Astro.locals.user;
+const isAdmin = user.role === "admin";
+
+const addResult = Astro.getActionResult(actions.places.add);
+const editResult = Astro.getActionResult(actions.places.edit);
+const deleteResult = Astro.getActionResult(actions.places.delete);
+const error =
+  addResult?.error?.message ??
+  editResult?.error?.message ??
+  deleteResult?.error?.message;
+
+const places = await db
+  .selectFrom("place")
+  .selectAll()
+  .orderBy("archived")
+  .orderBy("name")
+  .execute();
+---
+
+<Layout title="Places — Lunch">
+  <h1 class="mb-4 text-2xl font-bold">Places</h1>
+
+  {error && <div class="alert alert-error mb-4 text-sm">{error}</div>}
+
+  <div class="card bg-base-100 mb-6 shadow-sm">
+    <div class="card-body">
+      <h2 class="card-title text-lg">Add a place</h2>
+      <form
+        method="POST"
+        action={actions.places.add}
+        class="flex flex-col gap-2 sm:flex-row sm:items-end"
+      >
+        <label class="form-control flex-1">
+          <span class="label-text mb-1">Name</span>
+          <input
+            name="name"
+            class="input input-bordered input-sm w-full"
+            required
+            maxlength="80"
+          />
+        </label>
+        <label class="form-control flex-1">
+          <span class="label-text mb-1">URL (optional)</span>
+          <input
+            name="url"
+            type="url"
+            class="input input-bordered input-sm w-full"
+            placeholder="https://…"
+          />
+        </label>
+        <label class="form-control flex-1">
+          <span class="label-text mb-1">Notes (optional)</span>
+          <input
+            name="notes"
+            class="input input-bordered input-sm w-full"
+            maxlength="500"
+          />
+        </label>
+        <label class="form-control">
+          <span class="label-text mb-1">Cuisine</span>
+          <input
+            name="cuisine"
+            list="cuisines"
+            class="input input-bordered input-sm w-32"
+            maxlength="40"
+          />
+        </label>
+        <label class="form-control">
+          <span class="label-text mb-1">Coordinates</span>
+          <input
+            name="coords"
+            class="input input-bordered input-sm w-44"
+            placeholder="60.1699, 24.9384"
+          />
+        </label>
+        <button class="btn btn-primary btn-sm" type="submit">Add</button>
+      </form>
+    </div>
+  </div>
+
+  <datalist id="cuisines">
+    <option value="buffet"></option>
+    <option value="burgers"></option>
+    <option value="chinese"></option>
+    <option value="indian"></option>
+    <option value="italian"></option>
+    <option value="japanese"></option>
+    <option value="kebab"></option>
+    <option value="korean"></option>
+    <option value="mexican"></option>
+    <option value="nepalese"></option>
+    <option value="pizza"></option>
+    <option value="salads"></option>
+    <option value="sushi"></option>
+    <option value="thai"></option>
+    <option value="vegan"></option>
+    <option value="vietnamese"></option>
+  </datalist>
+
+  <ul class="flex flex-col gap-2">
+    {
+      places.map((place) => (
+        <li
+          class={`card bg-base-100 shadow-sm ${place.archived ? "opacity-50" : ""}`}
+        >
+          <div class="card-body flex-row items-center justify-between gap-2 py-3">
+            <div>
+              <a href={`/places/${place.slug}`} class="link font-medium">
+                {place.name}
+              </a>
+              {place.cuisine && (
+                <span class="badge badge-outline badge-sm ml-2">
+                  {place.cuisine}
+                </span>
+              )}
+              {place.url && (
+                <a
+                  href={place.url}
+                  target="_blank"
+                  rel="noopener"
+                  class="link text-base-content/60 ml-2 text-xs"
+                >
+                  website ↗
+                </a>
+              )}
+              {place.archived === 1 && (
+                <span class="badge badge-ghost badge-sm ml-2">archived</span>
+              )}
+              {place.notes && (
+                <p class="text-base-content/70 text-sm">{place.notes}</p>
+              )}
+              <p class="text-base-content/50 text-xs">
+                added by {place.created_by}
+              </p>
+            </div>
+            {isAdmin && (
+              <div class="flex items-center gap-1">
+                <form method="POST" action={actions.places.setArchived}>
+                  <input type="hidden" name="id" value={place.id} />
+                  <input
+                    type="hidden"
+                    name="archived"
+                    value={place.archived ? "" : "true"}
+                  />
+                  <button class="btn btn-ghost btn-xs" type="submit">
+                    {place.archived ? "Restore" : "Archive"}
+                  </button>
+                </form>
+                <form
+                  method="POST"
+                  action={actions.places.delete}
+                  onsubmit={`return confirm(${JSON.stringify(`Delete ${place.name}? Votes for it are removed too.`)})`}
+                >
+                  <input type="hidden" name="id" value={place.id} />
+                  <button class="btn btn-ghost btn-xs text-error" type="submit">
+                    Delete
+                  </button>
+                </form>
+              </div>
+            )}
+          </div>
+          {isAdmin && (
+            <details class="border-base-200 border-t">
+              <summary class="text-base-content/60 cursor-pointer px-6 py-2 text-xs select-none">
+                Edit
+              </summary>
+              <form
+                method="POST"
+                action={actions.places.edit}
+                class="flex flex-col gap-2 px-6 pb-4 sm:flex-row sm:items-end"
+              >
+                <input type="hidden" name="id" value={place.id} />
+                <label class="form-control flex-1">
+                  <span class="label-text mb-1">Name</span>
+                  <input
+                    name="name"
+                    class="input input-bordered input-sm w-full"
+                    required
+                    maxlength="80"
+                    value={place.name}
+                  />
+                </label>
+                <label class="form-control flex-1">
+                  <span class="label-text mb-1">URL</span>
+                  <input
+                    name="url"
+                    type="url"
+                    class="input input-bordered input-sm w-full"
+                    value={place.url ?? ""}
+                  />
+                </label>
+                <label class="form-control flex-1">
+                  <span class="label-text mb-1">Notes</span>
+                  <input
+                    name="notes"
+                    class="input input-bordered input-sm w-full"
+                    maxlength="500"
+                    value={place.notes ?? ""}
+                  />
+                </label>
+                <label class="form-control">
+                  <span class="label-text mb-1">Cuisine</span>
+                  <input
+                    name="cuisine"
+                    list="cuisines"
+                    class="input input-bordered input-sm w-32"
+                    maxlength="40"
+                    value={place.cuisine ?? ""}
+                  />
+                </label>
+                <label class="form-control">
+                  <span class="label-text mb-1">Coordinates</span>
+                  <input
+                    name="coords"
+                    class="input input-bordered input-sm w-44"
+                    placeholder="60.1699, 24.9384"
+                    value={
+                      place.lat !== null && place.lng !== null
+                        ? `${place.lat}, ${place.lng}`
+                        : ""
+                    }
+                  />
+                </label>
+                <button class="btn btn-primary btn-sm" type="submit">
+                  Save
+                </button>
+              </form>
+            </details>
+          )}
+        </li>
+      ))
+    }
+    {
+      places.length === 0 && (
+        <li class="text-base-content/60 py-8 text-center">
+          No places yet — add the first one above.
+        </li>
+      )
+    }
+  </ul>
+</Layout>

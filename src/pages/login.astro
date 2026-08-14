@@ -1,0 +1,71 @@
+---
+import Layout from "@/layouts/Layout.astro";
+import { passcodeMatches, sign, type Role } from "@/lib/authCookie";
+import { env } from "@/lib/env";
+import { AUTH_COOKIE } from "@/middleware";
+
+let error: string | null = null;
+
+if (Astro.request.method === "POST") {
+  const form = await Astro.request.formData();
+  const passcode = String(form.get("passcode") ?? "");
+  const name = String(form.get("name") ?? "").trim();
+
+  let role: Role | null = null;
+  if (passcodeMatches(passcode, env.ADMIN_PASSCODE)) role = "admin";
+  else if (passcodeMatches(passcode, env.SITE_PASSCODE)) role = "member";
+
+  if (!role) {
+    error = "Wrong passcode.";
+  } else if (name.length === 0 || name.length > 40) {
+    error = "Pick a name (max 40 characters).";
+  } else {
+    Astro.cookies.set(AUTH_COOKIE, sign({ name, role }, env.SESSION_SECRET), {
+      path: "/",
+      httpOnly: true,
+      sameSite: "lax",
+      secure: import.meta.env.PROD,
+      maxAge: 60 * 60 * 24 * 180,
+    });
+    return Astro.redirect("/");
+  }
+}
+---
+
+<Layout title="Log in — Lunch">
+  <div class="mx-auto mt-16 max-w-sm">
+    <div class="card bg-base-100 shadow-md">
+      <div class="card-body">
+        <h1 class="card-title text-2xl">🍽️ Lunch</h1>
+        <p class="text-base-content/70 text-sm">
+          Enter the passcode and pick a name.
+        </p>
+        {error && <div class="alert alert-error text-sm">{error}</div>}
+        <form method="POST" class="mt-2 flex flex-col gap-3">
+          <label class="form-control">
+            <span class="label-text mb-1">Passcode</span>
+            <input
+              type="password"
+              name="passcode"
+              class="input input-bordered w-full"
+              required
+              autocomplete="current-password"
+            />
+          </label>
+          <label class="form-control">
+            <span class="label-text mb-1">Your name</span>
+            <input
+              type="text"
+              name="name"
+              class="input input-bordered w-full"
+              required
+              maxlength="40"
+              autocomplete="username"
+            />
+          </label>
+          <button class="btn btn-primary mt-2" type="submit">Enter</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</Layout>

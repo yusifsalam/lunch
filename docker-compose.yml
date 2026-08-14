@@ -1,0 +1,30 @@
+# Lunch app. Single service, SQLite in a bind-mounted ./data dir — no database
+# container. Joins the shared Caddy ingress on the external `edge` network like
+# the other app stacks (`docker network create edge` if it doesn't exist yet,
+# e.g. for a local run) and publishes no host ports.
+#
+# Required in .env: SITE_PASSCODE, ADMIN_PASSCODE, SESSION_SECRET.
+
+name: lunch
+
+services:
+  lunch-web:
+    build:
+      context: .
+    image: lunch-web:latest
+    restart: unless-stopped
+    environment:
+      SITE_PASSCODE: ${SITE_PASSCODE:?SITE_PASSCODE must be set}
+      ADMIN_PASSCODE: ${ADMIN_PASSCODE:?ADMIN_PASSCODE must be set}
+      SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET must be set}
+    volumes:
+      # SQLite database file (and its WAL) live here, surviving deploys.
+      - ./data:/app/data
+    networks:
+      edge:
+        aliases:
+          - lunch-web
+
+networks:
+  edge:
+    external: true

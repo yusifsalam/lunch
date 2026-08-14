@@ -1,0 +1,41 @@
+{
+  "name": "lunch",
+  "type": "module",
+  "version": "0.0.1",
+  "packageManager": "pnpm@10.29.2",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "esbuild"
+    ]
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "astro": "astro",
+    "test": "vitest run",
+    "format": "prettier -w ."
+  },
+  "dependencies": {
+    "@astrojs/node": "^11.1.0",
+    "@astrojs/preact": "^6.0.2",
+    "@tailwindcss/vite": "^4.3.3",
+    "astro": "^7.2.0",
+    "better-sqlite3": "^12.4.1",
+    "kysely": "^0.29.4",
+    "preact": "^10.29.8",
+    "tailwindcss": "^4.3.3"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "daisyui": "^5.7.16",
+    "prettier": "^3.9.6",
+    "prettier-plugin-astro": "^0.14.1",
+    "prettier-plugin-tailwindcss": "^0.8.1",
+    "vitest": "^4.1.9"
+  }
+}

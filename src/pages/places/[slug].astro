@@ -1,0 +1,207 @@
+---
+import Layout from "@/layouts/Layout.astro";
+import { actions } from "astro:actions";
+import { formatPrice } from "@/lib/money";
+import { service } from "@/lib/service";
+
+const detail = await service.placeDetail(Astro.params.slug ?? "");
+if (!detail) {
+  return new Response(null, { status: 404, statusText: "Not found" });
+}
+
+const { place, chosenIn, totalVotes, menu } = detail;
+const isAdmin = Astro.locals.user.role === "admin";
+
+const addItemResult = Astro.getActionResult(actions.menu.addItem);
+const recordPriceResult = Astro.getActionResult(actions.menu.recordPrice);
+const menuError =
+  addItemResult?.error?.message ?? recordPriceResult?.error?.message;
+
+const modeEmoji: Record<string, string> = {
+  democracy: "🗳️",
+  dictatorship: "👑",
+  random: "🎲",
+};
+---
+
+<Layout title={`${place.name} — Lunch`}>
+  <div class="flex flex-col gap-4">
+    <div class="flex flex-wrap items-center gap-2">
+      <h1 class="text-2xl font-bold">{place.name}</h1>
+      {
+        place.cuisine && (
+          <span class="badge badge-outline">{place.cuisine}</span>
+        )
+      }
+      {place.archived === 1 && <span class="badge badge-ghost">archived</span>}
+    </div>
+
+    <div class="card bg-base-100 shadow-sm">
+      <div class="card-body gap-2 py-4">
+        {
+          place.url && (
+            <p>
+              <a href={place.url} target="_blank" rel="noopener" class="link">
+                {place.url} ↗
+              </a>
+            </p>
+          )
+        }
+        {place.notes && <p class="text-base-content/80">{place.notes}</p>}
+        {
+          place.lat !== null && place.lng !== null && (
+            <p class="text-base-content/70 text-sm">
+              📍 {place.lat}, {place.lng}
+            </p>
+          )
+        }
+        <p class="text-base-content/50 text-sm">
+          Added by {place.created_by} on {place.created_at.slice(0, 10)}
+        </p>
+      </div>
+    </div>
+
+    <div class="stats bg-base-100 shadow-sm">
+      <div class="stat">
+        <div class="stat-title">Times chosen</div>
+        <div class="stat-value">{chosenIn.length}</div>
+      </div>
+      <div class="stat">
+        <div class="stat-title">Votes received</div>
+        <div class="stat-value">{totalVotes}</div>
+      </div>
+    </div>
+
+    <div class="card bg-base-100 shadow-sm">
+      <div class="card-body py-4">
+        <h2 class="text-sm font-semibold uppercase opacity-60">Menu</h2>
+        {menuError && <div class="alert alert-error text-sm">{menuError}</div>}
+        {
+          menu.length === 0 && (
+            <p class="text-base-content/60 text-sm">
+              Nothing on the menu yet — add the first item below.
+            </p>
+          )
+        }
+        <ul class="flex flex-col">
+          {
+            menu.map((item) => (
+              <li class="border-base-200 border-b py-2 last:border-b-0">
+                <div class="flex items-center justify-between gap-2">
+                  <span class="font-medium">{item.name}</span>
+                  <span class="flex items-center gap-2">
+                    <span class="badge badge-neutral">
+                      {formatPrice(item.prices[0]!.price_cents)}
+                    </span>
+                    {isAdmin && (
+                      <form
+                        method="POST"
+                        action={actions.menu.deleteItem}
+                        onsubmit={`return confirm(${JSON.stringify(`Delete ${item.name} and its price history?`)})`}
+                      >
+                        <input type="hidden" name="itemId" value={item.id} />
+                        <button
+                          class="btn btn-ghost btn-xs text-error"
+                          type="submit"
+                        >
+                          Delete
+                        </button>
+                      </form>
+                    )}
+                  </span>
+                </div>
+                <details>
+                  <summary class="text-base-content/60 cursor-pointer text-xs select-none">
+                    Price history ({item.prices.length}) · update
+                  </summary>
+                  <div class="flex flex-col gap-2 py-2 pl-2">
+                    <ul class="text-base-content/70 flex flex-col gap-0.5 text-sm">
+                      {item.prices.map((p, i) => (
+                        <li>
+                          {formatPrice(p.price_cents)}
+                          {i === 0 && " (current)"}
+                          <span class="text-base-content/50 text-xs">
+                            {" "}
+                            — {p.recorded_at.slice(0, 10)} by {p.recorded_by}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                    <form
+                      method="POST"
+                      action={actions.menu.recordPrice}
+                      class="flex items-center gap-2"
+                    >
+                      <input type="hidden" name="itemId" value={item.id} />
+                      <input
+                        name="price"
+                        class="input input-bordered input-xs w-24"
+                        placeholder="12.50"
+                        required
+                      />
+                      <button class="btn btn-xs" type="submit">
+                        New price
+                      </button>
+                    </form>
+                  </div>
+                </details>
+              </li>
+            ))
+          }
+        </ul>
+        <form
+          method="POST"
+          action={actions.menu.addItem}
+          class="mt-2 flex flex-wrap items-end gap-2"
+        >
+          <input type="hidden" name="placeId" value={place.id} />
+          <label class="form-control">
+            <span class="label-text mb-1 text-xs">Item (dish or buffet)</span>
+            <input
+              name="name"
+              class="input input-bordered input-sm"
+              required
+              maxlength="80"
+            />
+          </label>
+          <label class="form-control">
+            <span class="label-text mb-1 text-xs">Price €</span>
+            <input
+              name="price"
+              class="input input-bordered input-sm w-24"
+              placeholder="12.50"
+              required
+            />
+          </label>
+          <button class="btn btn-primary btn-sm" type="submit">Add</button>
+        </form>
+      </div>
+    </div>
+
+    {
+      chosenIn.length > 0 && (
+        <div class="card bg-base-100 shadow-sm">
+          <div class="card-body py-4">
+            <h2 class="text-sm font-semibold uppercase opacity-60">
+              Chosen on
+            </h2>
+            <ul class="flex flex-col gap-1">
+              {chosenIn.map((s) => (
+                <li>
+                  <a href={`/sessions/${s.public_id}`} class="link">
+                    {s.date}
+                  </a>{" "}
+                  <span class="text-base-content/60 text-sm">
+                    {modeEmoji[s.mode]} {s.mode}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )
+    }
+
+    <a href="/places" class="link text-sm">← All places</a>
+  </div>
+</Layout>

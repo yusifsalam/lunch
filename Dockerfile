@@ -1,0 +1,40 @@
+# syntax=docker/dockerfile:1
+
+# Multi-stage build for the Astro node standalone server (pnpm).
+# node:24-slim (glibc), not alpine: better-sqlite3 ships glibc prebuilds,
+# so the install needs no native toolchain.
+FROM node:24-slim AS base
+ENV PNPM_HOME=/pnpm
+ENV PATH=$PNPM_HOME:$PATH
+RUN corepack enable
+WORKDIR /app
+
+# Full install (incl. dev deps) + build. Everything is SSR — no database
+# needed at build time.
+FROM base AS build
+COPY package.json pnpm-lock.yaml ./
+RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile
+COPY . .
+RUN pnpm build
+
+# Production-only dependencies, resolved separately so dev deps stay out of the image.
+FROM base AS prod-deps
+COPY package.json pnpm-lock.yaml ./
+RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile --prod
+
+# Slim runtime: prod node_modules + built output + migrations.
+FROM node:24-slim AS runtime
+WORKDIR /app
+ENV NODE_ENV=production
+ENV HOST=0.0.0.0
+ENV PORT=4321
+# Migrations are applied at startup by the server itself (src/db/migrate.ts);
+# the source tree isn't in the image, so point MIGRATIONS_DIR at this copy.
+ENV MIGRATIONS_DIR=/app/migrations
+ENV DATABASE_PATH=/app/data/lunch.db
+COPY --from=prod-deps /app/node_modules ./node_modules
+COPY --from=build /app/dist ./dist
+COPY --from=build /app/src/db/migrations ./migrations
+COPY package.json ./
+EXPOSE 4321
+CMD ["node", "dist/server/entry.mjs"]

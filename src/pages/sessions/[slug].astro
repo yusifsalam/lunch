@@ -1,0 +1,153 @@
+---
+import Layout from "@/layouts/Layout.astro";
+import { service } from "@/lib/service";
+import { TZ } from "@/lib/sessionService";
+import { todayInfo } from "@/lib/lunch";
+
+const detail = await service.sessionDetail(Astro.params.slug ?? "");
+if (!detail) {
+  return new Response(null, { status: 404, statusText: "Not found" });
+}
+
+const { session, participants, votes, places } = detail;
+const findPlace = (placeId: number | null) =>
+  places.find((p) => p.id === placeId);
+const placeName = (placeId: number | null) => findPlace(placeId)?.name ?? "?";
+const isToday = session.date === todayInfo(new Date(), TZ).date;
+
+const modeLabel: Record<string, string> = {
+  democracy: "🗳️ Democracy",
+  dictatorship: "👑 Dictatorship",
+  random: "🎲 Random",
+};
+
+const dateLabel = new Date(session.date + "T00:00:00").toLocaleDateString(
+  "en-GB",
+  { weekday: "long", day: "numeric", month: "long", year: "numeric" },
+);
+---
+
+<Layout title={`${session.date} — Lunch`}>
+  <div class="flex flex-col gap-4">
+    <div class="flex flex-wrap items-center gap-2">
+      <h1 class="text-2xl font-bold">{dateLabel}</h1>
+      <span class="badge badge-primary">{modeLabel[session.mode]}</span>
+      {
+        session.status === "finalized" ? (
+          <span class="badge badge-success">decided</span>
+        ) : (
+          <span class="badge badge-ghost">open</span>
+        )
+      }
+      <span class="badge badge-ghost badge-sm">#{session.public_id}</span>
+    </div>
+
+    {
+      isToday && (
+        <div class="alert text-sm">
+          <span>
+            This is today's session —{" "}
+            <a href="/" class="link">
+              go to the live page
+            </a>{" "}
+            to join and vote.
+          </span>
+        </div>
+      )
+    }
+
+    {
+      session.status === "finalized" && (
+        <div class="card bg-success/10 border-success border shadow-sm">
+          <div class="card-body items-center py-8 text-center">
+            <p class="text-base-content/70 text-sm">The group ate at</p>
+            <p class="text-3xl font-bold">
+              {findPlace(session.chosen_place_id) ? (
+                <a
+                  href={`/places/${findPlace(session.chosen_place_id)!.slug}`}
+                  class="hover:link"
+                >
+                  {placeName(session.chosen_place_id)}
+                </a>
+              ) : (
+                placeName(session.chosen_place_id)
+              )}
+            </p>
+          </div>
+        </div>
+      )
+    }
+
+    {
+      session.mode === "dictatorship" && session.dictator_name && (
+        <div class="card bg-base-100 shadow-sm">
+          <div class="card-body py-4">
+            <p>👑 Dictator: {session.dictator_name}</p>
+          </div>
+        </div>
+      )
+    }
+
+    {
+      votes.length > 0 && (
+        <div class="card bg-base-100 shadow-sm">
+          <div class="card-body">
+            <h2 class="text-sm font-semibold uppercase opacity-60">Votes</h2>
+            <ul class="flex flex-col gap-1">
+              {[...votes]
+                .sort((a, b) => b.count - a.count)
+                .map((v) => (
+                  <li class="flex items-center justify-between">
+                    <span>
+                      {findPlace(v.placeId) ? (
+                        <a
+                          href={`/places/${findPlace(v.placeId)!.slug}`}
+                          class="link"
+                        >
+                          {placeName(v.placeId)}
+                        </a>
+                      ) : (
+                        placeName(v.placeId)
+                      )}
+                      {session.chosen_place_id === v.placeId && " 🏆"}
+                    </span>
+                    <span class="flex items-center gap-2">
+                      <span class="text-base-content/60 text-xs">
+                        {v.voters.join(", ")}
+                      </span>
+                      <span class="badge badge-neutral">{v.count}</span>
+                    </span>
+                  </li>
+                ))}
+            </ul>
+          </div>
+        </div>
+      )
+    }
+
+    <div class="card bg-base-100 shadow-sm">
+      <div class="card-body py-4">
+        <h2 class="text-sm font-semibold uppercase opacity-60">
+          Who was in ({participants.length})
+        </h2>
+        {
+          participants.length === 0 ? (
+            <p class="text-base-content/60 text-sm">Nobody joined.</p>
+          ) : (
+            <div class="flex flex-wrap gap-1">
+              {participants.map((p) => (
+                <span class="badge badge-outline">
+                  {p.name}
+                  {session.dictator_name?.toLowerCase() ===
+                    p.name.toLowerCase() && " 👑"}
+                </span>
+              ))}
+            </div>
+          )
+        }
+      </div>
+    </div>
+
+    <a href="/history" class="link text-sm">← Back to history</a>
+  </div>
+</Layout>
