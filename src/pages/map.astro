@@ -1,0 +1,56 @@
+---
+import Layout from "@/layouts/Layout.astro";
+import PlaceMap from "@/components/PlaceMap.astro";
+import { db } from "@/db/db";
+
+const places = await db
+  .selectFrom("place")
+  .select(["name", "slug", "lat", "lng"])
+  .where("archived", "=", 0)
+  .orderBy("name")
+  .execute();
+
+const located = places.filter((p) => p.lat !== null && p.lng !== null);
+const missing = places.filter((p) => p.lat === null || p.lng === null);
+
+const markers = located.map((p) => ({
+  lat: p.lat!,
+  lng: p.lng!,
+  name: p.name,
+  slug: p.slug,
+}));
+---
+
+<Layout title="Map — Lunch">
+  <h1 class="mb-4 text-2xl font-bold">Map</h1>
+
+  {
+    located.length > 0 ? (
+      <PlaceMap markers={markers} class="h-[70vh]" />
+    ) : (
+      <div class="text-base-content/60 py-8 text-center">
+        No places have coordinates yet — add them on the{" "}
+        <a href="/places" class="link">
+          Places
+        </a>{" "}
+        page.
+      </div>
+    )
+  }
+
+  {
+    located.length > 0 && missing.length > 0 && (
+      <p class="text-base-content/60 mt-3 text-sm">
+        No coordinates yet:{" "}
+        {missing.map((p, i) => (
+          <>
+            {i > 0 && ", "}
+            <a href={`/places/${p.slug}`} class="link">
+              {p.name}
+            </a>
+          </>
+        ))}
+      </p>
+    )
+  }
+</Layout>

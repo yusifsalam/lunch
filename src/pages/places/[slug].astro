@@ -1,5 +1,6 @@
 ---
 import Layout from "@/layouts/Layout.astro";
+import PlaceMap from "@/components/PlaceMap.astro";
 import { actions } from "astro:actions";
 import { formatPrice } from "@/lib/money";
 import { service } from "@/lib/service";
@@ -60,6 +61,15 @@ const modeEmoji: Record<string, string> = {
         </p>
       </div>
     </div>
+
+    {
+      place.lat !== null && place.lng !== null && (
+        <PlaceMap
+          markers={[{ lat: place.lat, lng: place.lng, name: place.name }]}
+          class="h-64"
+        />
+      )
+    }
 
     <div class="stats bg-base-100 shadow-sm">
       <div class="stat">

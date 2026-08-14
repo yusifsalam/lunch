@@ -37,6 +37,12 @@ const path = Astro.url.pathname;
                 Places
               </a>
               <a
+                href="/map"
+                class={`btn btn-ghost btn-sm ${path === "/map" ? "btn-active" : ""}`}
+              >
+                Map
+              </a>
+              <a
                 href="/history"
                 class={`btn btn-ghost btn-sm ${path === "/history" ? "btn-active" : ""}`}
               >
