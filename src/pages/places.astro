@@ -10,10 +10,8 @@ const isAdmin = user.role === "admin";
 const addResult = Astro.getActionResult(actions.places.add);
 const editResult = Astro.getActionResult(actions.places.edit);
 const deleteResult = Astro.getActionResult(actions.places.delete);
-const error =
-  addResult?.error?.message ??
-  editResult?.error?.message ??
-  deleteResult?.error?.message;
+const addError = addResult?.error?.message;
+const error = editResult?.error?.message ?? deleteResult?.error?.message;
 
 const places = await db
   .selectFrom("place")
@@ -25,41 +23,50 @@ const closedToday = await service.closedPlacesToday();
 ---
 
 <Layout title="Places — Lunch">
-  <h1 class="mb-4 text-2xl font-bold">Places</h1>
+  <div class="mb-4 flex items-center justify-between">
+    <h1 class="text-2xl font-bold">Places</h1>
+    <button
+      class="btn btn-primary btn-sm"
+      onclick="add_place_modal.showModal()"
+    >
+      Add a place
+    </button>
+  </div>
 
   {error && <div class="alert alert-error mb-4 text-sm">{error}</div>}
 
-  <div class="card bg-base-100 mb-6 shadow-sm">
-    <div class="card-body">
-      <h2 class="card-title text-lg">Add a place</h2>
+  <dialog id="add_place_modal" class="modal backdrop-blur-sm">
+    <div class="modal-box">
+      <h2 class="mb-4 text-lg font-bold">Add a place</h2>
+      {addError && <div class="alert alert-error mb-4 text-sm">{addError}</div>}
       <form
         method="POST"
         action={actions.places.add}
-        class="flex flex-col gap-2 sm:flex-row sm:items-end"
+        class="flex flex-col gap-3"
       >
-        <label class="form-control flex-1">
+        <label class="form-control">
           <span class="label-text mb-1">Name</span>
           <input
             name="name"
-            class="input input-bordered input-sm w-full"
+            class="input input-bordered w-full"
             required
             maxlength="80"
           />
         </label>
-        <label class="form-control flex-1">
+        <label class="form-control">
           <span class="label-text mb-1">URL (optional)</span>
           <input
             name="url"
             type="url"
-            class="input input-bordered input-sm w-full"
+            class="input input-bordered w-full"
             placeholder="https://…"
           />
         </label>
-        <label class="form-control flex-1">
+        <label class="form-control">
           <span class="label-text mb-1">Notes (optional)</span>
           <input
             name="notes"
-            class="input input-bordered input-sm w-full"
+            class="input input-bordered w-full"
             maxlength="500"
           />
         </label>
@@ -68,7 +75,7 @@ const closedToday = await service.closedPlacesToday();
           <input
             name="cuisine"
             list="cuisines"
-            class="input input-bordered input-sm w-32"
+            class="input input-bordered w-full"
             maxlength="40"
           />
         </label>
@@ -76,14 +83,23 @@ const closedToday = await service.closedPlacesToday();
           <span class="label-text mb-1">Coordinates</span>
           <input
             name="coords"
-            class="input input-bordered input-sm w-44"
+            class="input input-bordered w-full"
             placeholder="60.1699, 24.9384"
           />
         </label>
-        <button class="btn btn-primary btn-sm" type="submit">Add</button>
+        <div class="modal-action">
+          <button type="button" class="btn" onclick="add_place_modal.close()">
+            Cancel
+          </button>
+          <button class="btn btn-primary" type="submit">Add</button>
+        </div>
       </form>
     </div>
-  </div>
+    <form method="dialog" class="modal-backdrop">
+      <button>close</button>
+    </form>
+  </dialog>
+  {addError && <script is:inline>add_place_modal.showModal();</script>}
 
   <datalist id="cuisines">
     <option value="buffet"></option>
@@ -248,7 +264,7 @@ const closedToday = await service.closedPlacesToday();
     {
       places.length === 0 && (
         <li class="text-base-content/60 py-8 text-center">
-          No places yet — add the first one above.
+          No places yet — add the first one.
         </li>
       )
     }
