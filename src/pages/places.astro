@@ -2,6 +2,7 @@
 import Layout from "@/layouts/Layout.astro";
 import { actions } from "astro:actions";
 import { db } from "@/db/db";
+import { service } from "@/lib/service";
 
 const user = Astro.locals.user;
 const isAdmin = user.role === "admin";
@@ -20,6 +21,7 @@ const places = await db
   .orderBy("archived")
   .orderBy("name")
   .execute();
+const closedToday = await service.closedPlacesToday();
 ---
 
 <Layout title="Places — Lunch">
@@ -130,6 +132,14 @@ const places = await db
               )}
               {place.archived === 1 && (
                 <span class="badge badge-ghost badge-sm ml-2">archived</span>
+              )}
+              {closedToday.has(place.id) && (
+                <span
+                  class="badge badge-warning badge-sm ml-2"
+                  title={closedToday.get(place.id)}
+                >
+                  closed today
+                </span>
               )}
               {place.notes && (
                 <p class="text-base-content/70 text-sm">{place.notes}</p>

@@ -6,7 +6,11 @@ export interface TodayInfo {
   /** 'YYYY-MM-DD' in the given timezone */
   date: string;
   isWeekday: boolean;
+  /** ISO weekday: 1=Mon … 7=Sun */
+  weekday: number;
 }
+
+const WEEKDAY_ABBR = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 export function todayInfo(now: Date, tz: string): TodayInfo {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -18,8 +22,9 @@ export function todayInfo(now: Date, tz: string): TodayInfo {
   }).formatToParts(now);
   const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
   const date = `${get("year")}-${get("month")}-${get("day")}`;
-  const isWeekday = !["Sat", "Sun"].includes(get("weekday"));
-  return { date, isWeekday };
+  const weekday = WEEKDAY_ABBR.indexOf(get("weekday")) + 1;
+  const isWeekday = weekday >= 1 && weekday <= 5;
+  return { date, isWeekday, weekday };
 }
 
 /** placeId → number of votes */

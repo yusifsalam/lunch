@@ -1,5 +1,6 @@
 import type { Kysely, Selectable } from "kysely";
 import type { DB, SessionMode, SessionTable } from "@/db/types";
+import { closedReason, WEEKDAY_NAMES } from "./hours";
 import { decideFinalize, todayInfo, type Rng } from "./lunch";
 import { generateSlug, slugify } from "./slug";
 
@@ -99,6 +100,10 @@ export function createService(db: Kysely<DB>, deps: ServiceDeps = {}) {
       .executeTakeFirst();
     if (!place)
       throw new LunchError("That place doesn't exist (or is archived).");
+    const closed = (await closedToday()).get(placeId);
+    if (closed) {
+      throw new LunchError(`That place is closed today (${closed}).`);
+    }
     await join(name);
     await db
       .insertInto("vote")
@@ -144,23 +149,54 @@ export function createService(db: Kysely<DB>, deps: ServiceDeps = {}) {
       .execute();
   }
 
+  /** placeId → reason, for places closed today (weekly schedule or closure). */
+  async function closedToday(): Promise<Map<number, string>> {
+    const today = todayInfo(now(), TZ);
+    const hours = await db.selectFrom("place_hours").selectAll().execute();
+    const closures = await db
+      .selectFrom("place_closure")
+      .selectAll()
+      .where("start_date", "<=", today.date)
+      .where("end_date", ">=", today.date)
+      .execute();
+    const closed = new Map<number, string>();
+    const placeIds = new Set([
+      ...hours.map((h) => h.place_id),
+      ...closures.map((c) => c.place_id),
+    ]);
+    for (const id of placeIds) {
+      const reason = closedReason(
+        hours.filter((h) => h.place_id === id),
+        closures.filter((c) => c.place_id === id),
+        today,
+      );
+      if (reason) closed.set(id, reason);
+    }
+    return closed;
+  }
+
   async function activePlaceIds(): Promise<number[]> {
     const rows = await db
       .selectFrom("place")
       .select("id")
       .where("archived", "=", 0)
       .execute();
-    return rows.map((r) => r.id);
+    const closed = await closedToday();
+    return rows.map((r) => r.id).filter((id) => !closed.has(id));
   }
 
   async function votesFor(sessionId: number): Promise<{ place_id: number }[]> {
-    return db
+    const rows = await db
       .selectFrom("vote")
       .innerJoin("place", "place.id", "vote.place_id")
       .select("vote.place_id")
       .where("vote.session_id", "=", sessionId)
       .where("place.archived", "=", 0)
       .execute();
+    // Votes for places that closed mid-day drop out of the tally, same as
+    // votes for later-archived places.
+    const closed = await closedToday();
+    return rows.filter((r) => !closed.has(r.place_id));
   }
 
   async function finalize() {
@@ -210,6 +246,10 @@ export function createService(db: Kysely<DB>, deps: ServiceDeps = {}) {
       .executeTakeFirst();
     if (!place)
       throw new LunchError("That place doesn't exist (or is archived).");
+    const closed = (await closedToday()).get(placeId);
+    if (closed) {
+      throw new LunchError(`That place is closed today (${closed}).`);
+    }
     await db
       .updateTable("session")
       .set({
@@ -244,6 +284,16 @@ export function createService(db: Kysely<DB>, deps: ServiceDeps = {}) {
       .execute();
   }
 
+  /** listPlaces plus each place's closed-today reason (null when open). */
+  async function listPlacesWithClosed() {
+    const places = await listPlaces();
+    const closed = await closedToday();
+    return places.map((p) => ({
+      ...p,
+      closedReason: closed.get(p.id) ?? null,
+    }));
+  }
+
   async function sessionState(sessionId: number) {
     const participants = await db
       .selectFrom("participant")
@@ -272,7 +322,7 @@ export function createService(db: Kysely<DB>, deps: ServiceDeps = {}) {
 
   async function snapshot(userName: string) {
     const session = await getOrCreateToday();
-    const places = await listPlaces();
+    const places = await listPlacesWithClosed();
     if (!session) {
       return {
         session: null,
@@ -299,7 +349,7 @@ export function createService(db: Kysely<DB>, deps: ServiceDeps = {}) {
       .executeTakeFirst();
     if (!session) return null;
     const { participants, votes } = await sessionState(session.id);
-    const places = await listPlaces();
+    const places = await listPlacesWithClosed();
     return { session, participants, votes, places };
   }
 
@@ -428,7 +478,27 @@ export function createService(db: Kysely<DB>, deps: ServiceDeps = {}) {
       .where("place_id", "=", place.id)
       .executeTakeFirstOrThrow();
     const menu = await menuFor(place.id);
-    return { place, chosenIn, totalVotes: Number(totalVotes.count), menu };
+    const hours = await db
+      .selectFrom("place_hours")
+      .selectAll()
+      .where("place_id", "=", place.id)
+      .orderBy("weekday")
+      .execute();
+    const closures = await db
+      .selectFrom("place_closure")
+      .selectAll()
+      .where("place_id", "=", place.id)
+      .orderBy("start_date", "desc")
+      .execute();
+    return {
+      place,
+      chosenIn,
+      totalVotes: Number(totalVotes.count),
+      menu,
+      hours,
+      closures,
+      closedReason: closedReason(hours, closures, todayInfo(now(), TZ)),
+    };
   }
 
   /** Distinct names can collapse to one slug ("Café Moto" / "Cafe Moto") — suffix with -N. */
@@ -532,6 +602,75 @@ export function createService(db: Kysely<DB>, deps: ServiceDeps = {}) {
     await db.deleteFrom("place").where("id", "=", id).execute();
   }
 
+  /** Full overwrite, like editPlace: days missing from `hours` become closed. */
+  async function setPlaceHours(
+    placeId: number,
+    hours: { weekday: number; open: string; close: string }[],
+  ) {
+    const place = await db
+      .selectFrom("place")
+      .select("id")
+      .where("id", "=", placeId)
+      .executeTakeFirst();
+    if (!place) throw new LunchError("That place doesn't exist.");
+    for (const h of hours) {
+      if (h.open >= h.close) {
+        throw new LunchError(
+          `${WEEKDAY_NAMES[h.weekday - 1]}: opening time must be before closing time.`,
+        );
+      }
+    }
+    await db
+      .deleteFrom("place_hours")
+      .where("place_id", "=", placeId)
+      .execute();
+    if (hours.length > 0) {
+      await db
+        .insertInto("place_hours")
+        .values(
+          hours.map((h) => ({
+            place_id: placeId,
+            weekday: h.weekday,
+            open_time: h.open,
+            close_time: h.close,
+          })),
+        )
+        .execute();
+    }
+  }
+
+  async function addClosure(input: {
+    placeId: number;
+    startDate: string;
+    endDate: string;
+    reason: string;
+    createdBy: string;
+  }) {
+    const place = await db
+      .selectFrom("place")
+      .select("id")
+      .where("id", "=", input.placeId)
+      .executeTakeFirst();
+    if (!place) throw new LunchError("That place doesn't exist.");
+    if (input.startDate > input.endDate) {
+      throw new LunchError("The closure can't end before it starts.");
+    }
+    await db
+      .insertInto("place_closure")
+      .values({
+        place_id: input.placeId,
+        start_date: input.startDate,
+        end_date: input.endDate,
+        reason: input.reason,
+        created_by: input.createdBy,
+      })
+      .execute();
+  }
+
+  async function deleteClosure(id: number) {
+    await db.deleteFrom("place_closure").where("id", "=", id).execute();
+  }
+
   async function setPlaceArchived(id: number, archived: boolean) {
     await db
       .updateTable("place")
@@ -577,6 +716,10 @@ export function createService(db: Kysely<DB>, deps: ServiceDeps = {}) {
     editPlace,
     deletePlace,
     setPlaceArchived,
+    setPlaceHours,
+    addClosure,
+    deleteClosure,
+    closedPlacesToday: closedToday,
     history,
   };
 }

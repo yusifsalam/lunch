@@ -13,7 +13,14 @@ describe("todayInfo", () => {
   it("returns the date in the given timezone", () => {
     // 23:30 UTC on a Wednesday is already Thursday in Helsinki (UTC+3 in summer)
     const info = todayInfo(new Date("2026-08-12T23:30:00Z"), HELSINKI);
-    expect(info).toEqual({ date: "2026-08-13", isWeekday: true });
+    expect(info).toEqual({ date: "2026-08-13", isWeekday: true, weekday: 4 });
+  });
+
+  it("weekday index flips across the timezone boundary", () => {
+    // Friday 21:30 UTC = Saturday 00:30 Helsinki
+    const at = new Date("2026-08-14T21:30:00Z");
+    expect(todayInfo(at, HELSINKI).weekday).toBe(6);
+    expect(todayInfo(at, "UTC").weekday).toBe(5);
   });
 
   it("detects weekends", () => {

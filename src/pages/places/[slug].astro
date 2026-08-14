@@ -2,21 +2,34 @@
 import Layout from "@/layouts/Layout.astro";
 import PlaceMap from "@/components/PlaceMap.astro";
 import { actions } from "astro:actions";
+import { WEEKDAY_NAMES } from "@/lib/hours";
+import { todayInfo } from "@/lib/lunch";
 import { formatPrice } from "@/lib/money";
 import { service } from "@/lib/service";
+import { TZ } from "@/lib/sessionService";
 
 const detail = await service.placeDetail(Astro.params.slug ?? "");
 if (!detail) {
   return new Response(null, { status: 404, statusText: "Not found" });
 }
 
-const { place, chosenIn, totalVotes, menu } = detail;
+const { place, chosenIn, totalVotes, menu, hours, closures, closedReason } =
+  detail;
 const isAdmin = Astro.locals.user.role === "admin";
+const { date: today } = todayInfo(new Date(), TZ);
 
 const addItemResult = Astro.getActionResult(actions.menu.addItem);
 const recordPriceResult = Astro.getActionResult(actions.menu.recordPrice);
 const menuError =
   addItemResult?.error?.message ?? recordPriceResult?.error?.message;
+
+const setHoursResult = Astro.getActionResult(actions.places.setHours);
+const addClosureResult = Astro.getActionResult(actions.places.addClosure);
+const deleteClosureResult = Astro.getActionResult(actions.places.deleteClosure);
+const hoursError =
+  setHoursResult?.error?.message ??
+  addClosureResult?.error?.message ??
+  deleteClosureResult?.error?.message;
 
 const modeEmoji: Record<string, string> = {
   democracy: "🗳️",
@@ -35,6 +48,11 @@ const modeEmoji: Record<string, string> = {
         )
       }
       {place.archived === 1 && <span class="badge badge-ghost">archived</span>}
+      {
+        closedReason && (
+          <span class="badge badge-warning">closed today — {closedReason}</span>
+        )
+      }
     </div>
 
     <div class="card bg-base-100 shadow-sm">
@@ -79,6 +97,174 @@ const modeEmoji: Record<string, string> = {
       <div class="stat">
         <div class="stat-title">Votes received</div>
         <div class="stat-value">{totalVotes}</div>
+      </div>
+    </div>
+
+    <div class="card bg-base-100 shadow-sm">
+      <div class="card-body py-4">
+        <h2 class="text-sm font-semibold uppercase opacity-60">
+          Opening hours
+        </h2>
+        {
+          hoursError && (
+            <div class="alert alert-error text-sm">{hoursError}</div>
+          )
+        }
+        {
+          hours.length === 0 ? (
+            <p class="text-base-content/60 text-sm">
+              No hours set — assumed open every day.
+            </p>
+          ) : (
+            <ul class="flex flex-col gap-0.5 text-sm sm:w-64">
+              {WEEKDAY_NAMES.map((name, i) => {
+                const h = hours.find((r) => r.weekday === i + 1);
+                return (
+                  <li class="flex justify-between">
+                    <span>{name}</span>
+                    <span class={h ? "" : "text-base-content/50"}>
+                      {h ? `${h.open_time}–${h.close_time}` : "Closed"}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          )
+        }
+        {
+          isAdmin && (
+            <details>
+              <summary class="text-base-content/60 cursor-pointer text-xs select-none">
+                Edit hours
+              </summary>
+              <form
+                method="POST"
+                action={actions.places.setHours}
+                class="flex flex-col gap-1 py-2"
+              >
+                <input type="hidden" name="placeId" value={place.id} />
+                {WEEKDAY_NAMES.map((name, i) => {
+                  const h = hours.find((r) => r.weekday === i + 1);
+                  return (
+                    <label class="flex items-center gap-2 text-sm">
+                      <span class="w-24">{name}</span>
+                      <input
+                        type="time"
+                        name={`open${i + 1}`}
+                        class="input input-bordered input-xs"
+                        value={h?.open_time ?? ""}
+                      />
+                      <span>–</span>
+                      <input
+                        type="time"
+                        name={`close${i + 1}`}
+                        class="input input-bordered input-xs"
+                        value={h?.close_time ?? ""}
+                      />
+                    </label>
+                  );
+                })}
+                <p class="text-base-content/50 text-xs">
+                  Leave both fields empty for a day the place is closed; clear
+                  every field if the hours are unknown.
+                </p>
+                <button class="btn btn-primary btn-sm self-start" type="submit">
+                  Save hours
+                </button>
+              </form>
+            </details>
+          )
+        }
+      </div>
+    </div>
+
+    <div class="card bg-base-100 shadow-sm">
+      <div class="card-body py-4">
+        <h2 class="text-sm font-semibold uppercase opacity-60">Closures</h2>
+        {
+          closures.length === 0 && (
+            <p class="text-base-content/60 text-sm">
+              No exceptional closures (renovations, vacations, holidays).
+            </p>
+          )
+        }
+        <ul class="flex flex-col gap-1 text-sm">
+          {
+            closures.map((c) => (
+              <li class="flex flex-wrap items-center gap-2">
+                <span>
+                  {c.start_date === c.end_date
+                    ? c.start_date
+                    : `${c.start_date} – ${c.end_date}`}{" "}
+                  — {c.reason}
+                </span>
+                {c.start_date <= today && today <= c.end_date && (
+                  <span class="badge badge-warning badge-sm">active</span>
+                )}
+                <span class="text-base-content/50 text-xs">
+                  by {c.created_by}
+                </span>
+                {isAdmin && (
+                  <form
+                    method="POST"
+                    action={actions.places.deleteClosure}
+                    onsubmit={`return confirm(${JSON.stringify(`Delete the closure "${c.reason}"?`)})`}
+                  >
+                    <input type="hidden" name="closureId" value={c.id} />
+                    <button
+                      class="btn btn-ghost btn-xs text-error"
+                      type="submit"
+                    >
+                      Delete
+                    </button>
+                  </form>
+                )}
+              </li>
+            ))
+          }
+        </ul>
+        {
+          isAdmin && (
+            <form
+              method="POST"
+              action={actions.places.addClosure}
+              class="mt-2 flex flex-wrap items-end gap-2"
+            >
+              <input type="hidden" name="placeId" value={place.id} />
+              <label class="form-control">
+                <span class="label-text mb-1 text-xs">From</span>
+                <input
+                  type="date"
+                  name="startDate"
+                  class="input input-bordered input-sm"
+                  required
+                />
+              </label>
+              <label class="form-control">
+                <span class="label-text mb-1 text-xs">To</span>
+                <input
+                  type="date"
+                  name="endDate"
+                  class="input input-bordered input-sm"
+                  required
+                />
+              </label>
+              <label class="form-control">
+                <span class="label-text mb-1 text-xs">Reason</span>
+                <input
+                  name="reason"
+                  class="input input-bordered input-sm"
+                  placeholder="renovation"
+                  required
+                  maxlength="120"
+                />
+              </label>
+              <button class="btn btn-primary btn-sm" type="submit">
+                Add closure
+              </button>
+            </form>
+          )
+        }
       </div>
     </div>
 

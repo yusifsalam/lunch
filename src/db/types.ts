@@ -22,6 +22,26 @@ export interface PlaceTable {
   created_at: Generated<string>;
 }
 
+export interface PlaceHoursTable {
+  place_id: number;
+  /** ISO weekday: 1=Mon … 7=Sun. No row = closed that day. */
+  weekday: number;
+  /** 'HH:MM' 24h Helsinki wall-clock */
+  open_time: string;
+  close_time: string;
+}
+
+export interface PlaceClosureTable {
+  id: Generated<number>;
+  place_id: number;
+  /** 'YYYY-MM-DD', inclusive */
+  start_date: string;
+  end_date: string;
+  reason: string;
+  created_by: string;
+  created_at: Generated<string>;
+}
+
 export interface MenuItemTable {
   id: Generated<number>;
   place_id: number;
@@ -67,6 +87,8 @@ export interface VoteTable {
 
 export interface DB {
   place: PlaceTable;
+  place_hours: PlaceHoursTable;
+  place_closure: PlaceClosureTable;
   menu_item: MenuItemTable;
   menu_item_price: MenuItemPriceTable;
   session: SessionTable;

@@ -2,6 +2,7 @@ import { ActionError, defineAction } from "astro:actions";
 import { z } from "astro:schema";
 import type { AuthUser } from "@/lib/authCookie";
 import { parseCoords, type Coords } from "@/lib/geo";
+import { parseDateISO, parseTimeHHMM, WEEKDAY_NAMES } from "@/lib/hours";
 import { parsePriceCents } from "@/lib/money";
 import { service } from "@/lib/service";
 import { LunchError } from "@/lib/sessionService";
@@ -60,6 +61,20 @@ function requirePriceCents(price: string): number {
   }
   return cents;
 }
+
+/** "2026-8-14" and friends rejected — a real 'YYYY-MM-DD' or a rejection. */
+function requireDateISO(date: string): string {
+  const parsed = parseDateISO(date);
+  if (parsed === null) {
+    throw new ActionError({
+      code: "BAD_REQUEST",
+      message: "Use a date like 2026-08-14.",
+    });
+  }
+  return parsed;
+}
+
+const optionalTime = z.string().trim().max(10).optional();
 
 export const server = {
   lunch: {
@@ -239,6 +254,92 @@ export const server = {
       handler: async ({ id, archived }, ctx) => {
         requireAdmin(ctx.locals);
         await run(() => service.setPlaceArchived(id, archived));
+      },
+    }),
+    setHours: defineAction({
+      accept: "form",
+      input: z.object({
+        placeId: z.number().int().positive(),
+        // Field suffix = ISO weekday (1=Mon … 7=Sun); a day with both
+        // fields blank is closed that day.
+        open1: optionalTime,
+        close1: optionalTime,
+        open2: optionalTime,
+        close2: optionalTime,
+        open3: optionalTime,
+        close3: optionalTime,
+        open4: optionalTime,
+        close4: optionalTime,
+        open5: optionalTime,
+        close5: optionalTime,
+        open6: optionalTime,
+        close6: optionalTime,
+        open7: optionalTime,
+        close7: optionalTime,
+      }),
+      handler: async (input, ctx) => {
+        requireAdmin(ctx.locals);
+        const days = [
+          [input.open1, input.close1],
+          [input.open2, input.close2],
+          [input.open3, input.close3],
+          [input.open4, input.close4],
+          [input.open5, input.close5],
+          [input.open6, input.close6],
+          [input.open7, input.close7],
+        ];
+        const hours: { weekday: number; open: string; close: string }[] = [];
+        for (let weekday = 1; weekday <= 7; weekday++) {
+          const [openRaw, closeRaw] = days[weekday - 1];
+          if (!openRaw && !closeRaw) continue;
+          if (!openRaw || !closeRaw) {
+            throw new ActionError({
+              code: "BAD_REQUEST",
+              message: `Fill both open and close for ${WEEKDAY_NAMES[weekday - 1]}, or neither.`,
+            });
+          }
+          const open = parseTimeHHMM(openRaw);
+          const close = parseTimeHHMM(closeRaw);
+          if (!open || !close) {
+            throw new ActionError({
+              code: "BAD_REQUEST",
+              message: "Use a time like 11:00.",
+            });
+          }
+          hours.push({ weekday, open, close });
+        }
+        await run(() => service.setPlaceHours(input.placeId, hours));
+      },
+    }),
+    addClosure: defineAction({
+      accept: "form",
+      input: z.object({
+        placeId: z.number().int().positive(),
+        startDate: z.string().trim().max(10),
+        endDate: z.string().trim().max(10),
+        reason: z.string().trim().min(1).max(120),
+      }),
+      handler: async (input, ctx) => {
+        const user = requireAdmin(ctx.locals);
+        const startDate = requireDateISO(input.startDate);
+        const endDate = requireDateISO(input.endDate);
+        await run(() =>
+          service.addClosure({
+            placeId: input.placeId,
+            startDate,
+            endDate,
+            reason: input.reason,
+            createdBy: user.name,
+          }),
+        );
+      },
+    }),
+    deleteClosure: defineAction({
+      accept: "form",
+      input: z.object({ closureId: z.number().int().positive() }),
+      handler: async ({ closureId }, ctx) => {
+        requireAdmin(ctx.locals);
+        await run(() => service.deleteClosure(closureId));
       },
     }),
   },

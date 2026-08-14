@@ -76,7 +76,8 @@ export default function SessionView({ initial, user }: Props) {
   );
   const isDictator =
     session.dictator_name?.toLowerCase() === user.name.toLowerCase();
-  const activePlaces = places.filter((p) => !p.archived);
+  const activePlaces = places.filter((p) => !p.archived && !p.closedReason);
+  const closedPlaces = places.filter((p) => !p.archived && p.closedReason);
   const placeName = (id: number | null) =>
     places.find((p) => p.id === id)?.name ?? "?";
   const votesFor = (placeId: number) =>
@@ -207,6 +208,22 @@ export default function SessionView({ initial, user }: Props) {
                         <span class="badge badge-neutral">{v?.count ?? 0}</span>
                       </span>
                     </button>
+                  </li>
+                );
+              })}
+              {closedPlaces.map((place) => {
+                const v = votesFor(place.id);
+                return (
+                  <li key={place.id}>
+                    <div class="btn btn-disabled w-full justify-between">
+                      <span>
+                        {place.name}
+                        <span class="badge badge-ghost badge-sm ml-2">
+                          {place.closedReason}
+                        </span>
+                      </span>
+                      <span class="badge badge-neutral">{v?.count ?? 0}</span>
+                    </div>
                   </li>
                 );
               })}

@@ -466,3 +466,209 @@ describe("places", () => {
     await expect(service.deletePlace(a!)).rejects.toThrow(/archive/);
   });
 });
+
+describe("opening hours and closures", () => {
+  // FRIDAY = ISO weekday 5. Hours only on Monday → closed on Fridays.
+  const mondayOnly = [{ weekday: 1, open: "11:00", close: "14:00" }];
+  const allWeek = [1, 2, 3, 4, 5, 6, 7].map((weekday) => ({
+    weekday,
+    open: "11:00",
+    close: "14:00",
+  }));
+
+  it("rejects votes for a place whose hours skip today", async () => {
+    const [a] = await addPlaces("Sushi");
+    await service.setPlaceHours(a!, mondayOnly);
+    await expect(service.vote("Ada", a!)).rejects.toThrow(/closed on Fridays/);
+  });
+
+  it("a place with no hours configured stays votable", async () => {
+    const [a] = await addPlaces("Sushi");
+    await service.vote("Ada", a!);
+    const snap = await service.snapshot("Ada");
+    expect(snap.places[0]!.closedReason).toBe(null);
+  });
+
+  it("a closure covering today blocks vote and dictator pick", async () => {
+    const [a] = await addPlaces("Sushi");
+    await service.addClosure({
+      placeId: a!,
+      startDate: "2026-08-10",
+      endDate: "2026-08-20",
+      reason: "renovation",
+      createdBy: "Ada",
+    });
+    await expect(service.vote("Ada", a!)).rejects.toThrow(/renovation/);
+    await service.setMode("dictatorship");
+    await service.setDictator("Ada");
+    await expect(service.dictatorPick("Ada", a!)).rejects.toThrow(/renovation/);
+  });
+
+  it("closures next to today's date don't block", async () => {
+    const [a] = await addPlaces("Sushi");
+    await service.addClosure({
+      placeId: a!,
+      startDate: "2026-08-01",
+      endDate: "2026-08-13",
+      reason: "vacation",
+      createdBy: "Ada",
+    });
+    await service.addClosure({
+      placeId: a!,
+      startDate: "2026-08-15",
+      endDate: "2026-08-30",
+      reason: "vacation",
+      createdBy: "Ada",
+    });
+    await service.vote("Ada", a!);
+  });
+
+  it("democracy: votes for a place closed after voting drop from the tally", async () => {
+    const [a, b] = await addPlaces("Sushi", "Pizza");
+    await service.vote("Ada", a!);
+    await service.vote("Bob", a!);
+    await service.vote("Cyd", b!);
+    await service.addClosure({
+      placeId: a!,
+      startDate: "2026-08-14",
+      endDate: "2026-08-14",
+      reason: "holiday",
+      createdBy: "Ada",
+    });
+    await service.finalize();
+    expect((await service.getOrCreateToday())!.chosen_place_id).toBe(b);
+  });
+
+  it("random: draws only from places open today", async () => {
+    const [a, b] = await addPlaces("Sushi", "Pizza");
+    await service.setMode("random");
+    await service.setPlaceHours(a!, mondayOnly);
+    await service.finalize();
+    expect((await service.getOrCreateToday())!.chosen_place_id).toBe(b);
+  });
+
+  it("snapshot exposes closedReason per place", async () => {
+    const [a, b] = await addPlaces("Sushi", "Pizza");
+    await service.setPlaceHours(a!, mondayOnly);
+    const snap = await service.snapshot("Ada");
+    const byId = new Map(snap.places.map((p) => [p.id, p.closedReason]));
+    expect(byId.get(a!)).toBe("closed on Fridays");
+    expect(byId.get(b!)).toBe(null);
+  });
+
+  it("setPlaceHours is a full overwrite; [] means open again", async () => {
+    const [a] = await addPlaces("Sushi");
+    await service.setPlaceHours(a!, mondayOnly);
+    await service.setPlaceHours(a!, allWeek);
+    await service.vote("Ada", a!);
+    await service.setPlaceHours(a!, []);
+    const { hours } = (await service.placeDetail("sushi"))!;
+    expect(hours).toEqual([]);
+    await service.vote("Bob", a!);
+  });
+
+  it("placeDetail returns hours, closures, and closedReason", async () => {
+    const [a] = await addPlaces("Sushi");
+    await service.setPlaceHours(a!, mondayOnly);
+    await service.addClosure({
+      placeId: a!,
+      startDate: "2026-09-01",
+      endDate: "2026-09-07",
+      reason: "vacation",
+      createdBy: "Ada",
+    });
+    const detail = (await service.placeDetail("sushi"))!;
+    expect(detail.hours).toEqual([
+      { place_id: a, weekday: 1, open_time: "11:00", close_time: "14:00" },
+    ]);
+    expect(detail.closures[0]).toMatchObject({
+      start_date: "2026-09-01",
+      end_date: "2026-09-07",
+      reason: "vacation",
+      created_by: "Ada",
+    });
+    expect(detail.closedReason).toBe("closed on Fridays");
+  });
+
+  it("deleting a closure makes the place votable again", async () => {
+    const [a] = await addPlaces("Sushi");
+    await service.addClosure({
+      placeId: a!,
+      startDate: "2026-08-14",
+      endDate: "2026-08-14",
+      reason: "holiday",
+      createdBy: "Ada",
+    });
+    const closureId = (await service.placeDetail("sushi"))!.closures[0]!.id;
+    await service.deleteClosure(closureId);
+    await service.vote("Ada", a!);
+  });
+
+  it("reopen then closing the winner re-tallies to the runner-up", async () => {
+    const [a, b] = await addPlaces("Sushi", "Pizza");
+    await service.vote("Ada", a!);
+    await service.vote("Bob", b!);
+    await service.vote("Cyd", a!);
+    await service.finalize();
+    expect((await service.getOrCreateToday())!.chosen_place_id).toBe(a);
+    await service.reopen();
+    await service.addClosure({
+      placeId: a!,
+      startDate: "2026-08-14",
+      endDate: "2026-08-14",
+      reason: "sudden renovation",
+      createdBy: "Ada",
+    });
+    await service.finalize();
+    expect((await service.getOrCreateToday())!.chosen_place_id).toBe(b);
+  });
+
+  it("rejects invalid hours and closure ranges", async () => {
+    const [a] = await addPlaces("Sushi");
+    await expect(
+      service.setPlaceHours(a!, [
+        { weekday: 5, open: "14:00", close: "11:00" },
+      ]),
+    ).rejects.toThrow(/before closing/);
+    await expect(
+      service.addClosure({
+        placeId: a!,
+        startDate: "2026-08-20",
+        endDate: "2026-08-10",
+        reason: "vacation",
+        createdBy: "Ada",
+      }),
+    ).rejects.toThrow(/end before it starts/);
+    await expect(service.setPlaceHours(999, allWeek)).rejects.toThrow(
+      /doesn't exist/,
+    );
+    await expect(
+      service.addClosure({
+        placeId: 999,
+        startDate: "2026-08-14",
+        endDate: "2026-08-14",
+        reason: "x",
+        createdBy: "Ada",
+      }),
+    ).rejects.toThrow(/doesn't exist/);
+  });
+
+  it("place deletion cascades to hours and closures", async () => {
+    const [a] = await addPlaces("Sushi");
+    await service.setPlaceHours(a!, allWeek);
+    await service.addClosure({
+      placeId: a!,
+      startDate: "2026-09-01",
+      endDate: "2026-09-07",
+      reason: "vacation",
+      createdBy: "Ada",
+    });
+    await service.deletePlace(a!);
+    expect(
+      await db.selectFrom("place_hours").selectAll().execute(),
+    ).toHaveLength(0);
+    expect(
+      await db.selectFrom("place_closure").selectAll().execute(),
+    ).toHaveLength(0);
+  });
+});

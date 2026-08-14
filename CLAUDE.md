@@ -46,3 +46,4 @@ The code is layered so domain logic is testable without Astro or a real DB:
 - A place that was ever a finalized session's outcome can't be deleted, only archived. Archived places are excluded from voting/tallying but stay in history.
 - Reopening a session keeps votes/participants so re-finalizing re-tallies.
 - Recording an unchanged price is a no-op — price history stores changes only.
+- A place closed today (weekly hours skip today's weekday, or an active closure) is excluded from voting/tallying like an archived place. "Closed" is date-based, never time-of-day; a place with zero hours rows is assumed open.
