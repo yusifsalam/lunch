@@ -8,6 +8,14 @@ import { formatPrice } from "@/lib/money";
 import { service } from "@/lib/service";
 import { TZ } from "@/lib/sessionService";
 
+// Editing can rename the place and thus change its slug; follow it so the
+// post-submit render doesn't 404 on the old URL.
+const editResult = Astro.getActionResult(actions.places.edit);
+if (editResult?.data && editResult.data.slug !== Astro.params.slug) {
+  return Astro.redirect(`/places/${editResult.data.slug}`);
+}
+const editError = editResult?.error?.message;
+
 const detail = await service.placeDetail(Astro.params.slug ?? "");
 if (!detail) {
   return new Response(null, { status: 404, statusText: "Not found" });
@@ -53,7 +61,124 @@ const modeEmoji: Record<string, string> = {
           <span class="badge badge-warning">closed today — {closedReason}</span>
         )
       }
+      {
+        isAdmin && (
+          <button
+            class="btn btn-sm ml-auto"
+            onclick="edit_place_modal.showModal()"
+          >
+            Edit
+          </button>
+        )
+      }
     </div>
+
+    {
+      isAdmin && (
+        <dialog id="edit_place_modal" class="modal backdrop-blur-sm">
+          <div class="modal-box">
+            <h2 class="mb-4 text-lg font-bold">Edit place</h2>
+            {editError && (
+              <div class="alert alert-error mb-4 text-sm">{editError}</div>
+            )}
+            <form
+              method="POST"
+              action={actions.places.edit}
+              class="flex flex-col gap-3"
+            >
+              <input type="hidden" name="id" value={place.id} />
+              <label class="form-control">
+                <span class="label-text mb-1">Name</span>
+                <input
+                  name="name"
+                  class="input input-bordered w-full"
+                  required
+                  maxlength="80"
+                  value={place.name}
+                />
+              </label>
+              <label class="form-control">
+                <span class="label-text mb-1">URL (optional)</span>
+                <input
+                  name="url"
+                  type="url"
+                  class="input input-bordered w-full"
+                  placeholder="https://…"
+                  value={place.url ?? ""}
+                />
+              </label>
+              <label class="form-control">
+                <span class="label-text mb-1">Notes (optional)</span>
+                <input
+                  name="notes"
+                  class="input input-bordered w-full"
+                  maxlength="500"
+                  value={place.notes ?? ""}
+                />
+              </label>
+              <label class="form-control">
+                <span class="label-text mb-1">Cuisine</span>
+                <input
+                  name="cuisine"
+                  list="cuisines"
+                  class="input input-bordered w-full"
+                  maxlength="40"
+                  value={place.cuisine ?? ""}
+                />
+              </label>
+              <label class="form-control">
+                <span class="label-text mb-1">Coordinates</span>
+                <input
+                  name="coords"
+                  class="input input-bordered w-full"
+                  placeholder="60.1699, 24.9384"
+                  value={
+                    place.lat !== null && place.lng !== null
+                      ? `${place.lat}, ${place.lng}`
+                      : ""
+                  }
+                />
+              </label>
+              <div class="modal-action">
+                <button
+                  type="button"
+                  class="btn"
+                  onclick="edit_place_modal.close()"
+                >
+                  Cancel
+                </button>
+                <button class="btn btn-primary" type="submit">
+                  Save
+                </button>
+              </div>
+            </form>
+          </div>
+          <form method="dialog" class="modal-backdrop">
+            <button>close</button>
+          </form>
+        </dialog>
+      )
+    }
+    {editError && <script is:inline>edit_place_modal.showModal();</script>}
+
+    <datalist id="cuisines">
+      <option value="buffet"></option>
+      <option value="burgers"></option>
+      <option value="chinese"></option>
+      <option value="indian"></option>
+      <option value="italian"></option>
+      <option value="japanese"></option>
+      <option value="kebab"></option>
+      <option value="korean"></option>
+      <option value="mexican"></option>
+      <option value="nepalese"></option>
+      <option value="pizza"></option>
+      <option value="salads"></option>
+      <option value="sushi"></option>
+      <option value="thai"></option>
+      <option value="vegan"></option>
+      <option value="vietnamese"></option>
+    </datalist>
 
     <div class="card bg-base-100 shadow-sm">
       <div class="card-body gap-2 py-4">

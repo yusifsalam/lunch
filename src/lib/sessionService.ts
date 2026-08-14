@@ -563,11 +563,12 @@ export function createService(db: Kysely<DB>, deps: ServiceDeps = {}) {
     lng?: number | null;
   }) {
     try {
+      const slug = await uniquePlaceSlug(input.name, input.id);
       await db
         .updateTable("place")
         .set({
           name: input.name,
-          slug: await uniquePlaceSlug(input.name, input.id),
+          slug,
           url: input.url || null,
           notes: input.notes || null,
           cuisine: input.cuisine || null,
@@ -576,6 +577,7 @@ export function createService(db: Kysely<DB>, deps: ServiceDeps = {}) {
         })
         .where("id", "=", input.id)
         .execute();
+      return { slug };
     } catch (e) {
       if (String(e).includes("UNIQUE")) {
         throw new LunchError("A place with that name already exists.");

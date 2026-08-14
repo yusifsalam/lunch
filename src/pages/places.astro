@@ -8,10 +8,9 @@ const user = Astro.locals.user;
 const isAdmin = user.role === "admin";
 
 const addResult = Astro.getActionResult(actions.places.add);
-const editResult = Astro.getActionResult(actions.places.edit);
 const deleteResult = Astro.getActionResult(actions.places.delete);
 const addError = addResult?.error?.message;
-const error = editResult?.error?.message ?? deleteResult?.error?.message;
+const error = deleteResult?.error?.message;
 
 const places = await db
   .selectFrom("place")
@@ -190,74 +189,6 @@ const closedToday = await service.closedPlacesToday();
               </div>
             )}
           </div>
-          {isAdmin && (
-            <details class="border-base-200 border-t">
-              <summary class="text-base-content/60 cursor-pointer px-6 py-2 text-xs select-none">
-                Edit
-              </summary>
-              <form
-                method="POST"
-                action={actions.places.edit}
-                class="flex flex-col gap-2 px-6 pb-4 sm:flex-row sm:items-end"
-              >
-                <input type="hidden" name="id" value={place.id} />
-                <label class="form-control flex-1">
-                  <span class="label-text mb-1">Name</span>
-                  <input
-                    name="name"
-                    class="input input-bordered input-sm w-full"
-                    required
-                    maxlength="80"
-                    value={place.name}
-                  />
-                </label>
-                <label class="form-control flex-1">
-                  <span class="label-text mb-1">URL</span>
-                  <input
-                    name="url"
-                    type="url"
-                    class="input input-bordered input-sm w-full"
-                    value={place.url ?? ""}
-                  />
-                </label>
-                <label class="form-control flex-1">
-                  <span class="label-text mb-1">Notes</span>
-                  <input
-                    name="notes"
-                    class="input input-bordered input-sm w-full"
-                    maxlength="500"
-                    value={place.notes ?? ""}
-                  />
-                </label>
-                <label class="form-control">
-                  <span class="label-text mb-1">Cuisine</span>
-                  <input
-                    name="cuisine"
-                    list="cuisines"
-                    class="input input-bordered input-sm w-32"
-                    maxlength="40"
-                    value={place.cuisine ?? ""}
-                  />
-                </label>
-                <label class="form-control">
-                  <span class="label-text mb-1">Coordinates</span>
-                  <input
-                    name="coords"
-                    class="input input-bordered input-sm w-44"
-                    placeholder="60.1699, 24.9384"
-                    value={
-                      place.lat !== null && place.lng !== null
-                        ? `${place.lat}, ${place.lng}`
-                        : ""
-                    }
-                  />
-                </label>
-                <button class="btn btn-primary btn-sm" type="submit">
-                  Save
-                </button>
-              </form>
-            </details>
-          )}
         </li>
       ))
     }

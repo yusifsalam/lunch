@@ -224,7 +224,7 @@ export const server = {
       handler: async (input, ctx) => {
         requireAdmin(ctx.locals);
         const coords = optionalCoords(input.coords);
-        await run(() =>
+        return await run(() =>
           service.editPlace({
             id: input.id,
             name: input.name,
