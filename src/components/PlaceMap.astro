@@ -11,7 +11,8 @@ interface Props {
   class?: string;
 }
 
-const { markers, class: className = "rounded-box h-64 shadow-sm" } = Astro.props;
+const { markers, class: className = "rounded-box h-64 shadow-sm" } =
+  Astro.props;
 ---
 
 <div
@@ -45,6 +46,23 @@ const { markers, class: className = "rounded-box h-64 shadow-sm" } = Astro.props
   }
   .place-map .maplibregl-popup-anchor-right .maplibregl-popup-tip {
     border-left-color: var(--color-base-100);
+  }
+
+  /* MapLibre always auto-expands the compact attribution on load (there is
+     no start-collapsed option). Override its expanded-state rules so it
+     stays a plain ⓘ button and only reveals the credits on hover/focus. */
+  .place-map
+    .maplibregl-ctrl-attrib.maplibregl-compact-show:not(:hover):not(
+      :focus-within
+    ) {
+    padding: 2px 24px 2px 0;
+  }
+  .place-map
+    .maplibregl-ctrl-attrib.maplibregl-compact-show:not(:hover):not(
+      :focus-within
+    )
+    .maplibregl-ctrl-attrib-inner {
+    display: none;
   }
 </style>
 
