@@ -49,6 +49,7 @@ docker compose up -d --build
 
 Single container; SQLite persists in the bind-mounted `./data`. Joins the
 external `edge` network (shared Caddy ingress) as `lunch-web` and publishes no
-host ports. Required in `.env`: `SITE_PASSCODE`, `ADMIN_PASSCODE`,
-`SESSION_SECRET`. What counts as "today" and a weekday is hardcoded to
+host ports. Required in `.env`: `SITE_HOSTNAME` (public domain, used at build
+time so Astro trusts the proxy's forwarded headers), `SITE_PASSCODE`,
+`ADMIN_PASSCODE`, `SESSION_SECRET`. What counts as "today" and a weekday is hardcoded to
 Europe/Helsinki time.

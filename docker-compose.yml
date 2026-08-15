@@ -3,7 +3,7 @@
 # the other app stacks (`docker network create edge` if it doesn't exist yet,
 # e.g. for a local run) and publishes no host ports.
 #
-# Required in .env: SITE_PASSCODE, ADMIN_PASSCODE, SESSION_SECRET.
+# Required in .env: SITE_HOSTNAME, SITE_PASSCODE, ADMIN_PASSCODE, SESSION_SECRET.
 
 name: lunch
 
@@ -11,6 +11,9 @@ services:
   lunch-web:
     build:
       context: .
+      args:
+        # Build-time: baked into the Astro manifest (security.allowedDomains).
+        SITE_HOSTNAME: ${SITE_HOSTNAME:?SITE_HOSTNAME must be set}
     image: lunch-web:latest
     restart: unless-stopped
     environment:

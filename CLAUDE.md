@@ -9,7 +9,7 @@ App for deciding where a team eats lunch. One session per weekday, created lazil
 ## Commands
 
 ```sh
-cp .env.example .env    # required once: SITE_PASSCODE, ADMIN_PASSCODE, SESSION_SECRET
+cp .env.example .env    # required once: SITE_PASSCODE, ADMIN_PASSCODE, SESSION_SECRET (+ SITE_HOSTNAME for deploy)
 pnpm install
 pnpm dev                # dev server
 pnpm test               # vitest run (all tests)

@@ -16,6 +16,10 @@ FROM base AS build
 COPY package.json pnpm-lock.yaml ./
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile
 COPY . .
+# Public hostname baked into the build: astro.config.mjs turns it into
+# security.allowedDomains so forwarded headers from the proxy are trusted.
+ARG SITE_HOSTNAME
+ENV SITE_HOSTNAME=$SITE_HOSTNAME
 RUN pnpm build
 
 # Production-only dependencies, resolved separately so dev deps stay out of the image.
