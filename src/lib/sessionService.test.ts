@@ -408,6 +408,32 @@ describe("places", () => {
     expect(row).toMatchObject({ cuisine: "sushi", lat: 60.1699, lng: 24.9384 });
   });
 
+  it("stores tags on create and replaces them on edit", async () => {
+    await service.addPlace({
+      name: "Sushi",
+      tags: ["quick", "terrace"],
+      createdBy: "Ada",
+    });
+    const { id } = await db
+      .selectFrom("place")
+      .select("id")
+      .executeTakeFirstOrThrow();
+    let row = await db
+      .selectFrom("place")
+      .select("tags")
+      .executeTakeFirstOrThrow();
+    expect(JSON.parse(row.tags)).toEqual(["quick", "terrace"]);
+
+    await service.editPlace({ id, name: "Sushi", tags: ["vegan-friendly"] });
+    row = await db.selectFrom("place").select("tags").executeTakeFirstOrThrow();
+    expect(JSON.parse(row.tags)).toEqual(["vegan-friendly"]);
+
+    // an edit without tags clears them, matching the form's empty field
+    await service.editPlace({ id, name: "Sushi" });
+    row = await db.selectFrom("place").select("tags").executeTakeFirstOrThrow();
+    expect(JSON.parse(row.tags)).toEqual([]);
+  });
+
   it("edits name, url, notes, cuisine, and coordinates", async () => {
     const [a] = await addPlaces("Sushi");
     await service.editPlace({

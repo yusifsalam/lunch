@@ -6,6 +6,7 @@ import { parseDateISO, parseTimeHHMM, WEEKDAY_NAMES } from "@/lib/hours";
 import { parsePriceCents } from "@/lib/money";
 import { service } from "@/lib/service";
 import { LunchError } from "@/lib/sessionService";
+import { parseTagsInput } from "@/lib/tags";
 
 function requireUser(locals: App.Locals): AuthUser {
   // Middleware already gates /_actions/*; this is a typed backstop.
@@ -195,6 +196,7 @@ export const server = {
         cuisine: z.string().trim().max(40).optional(),
         address: z.string().trim().max(200).optional(),
         coords: z.string().trim().max(60).optional(),
+        tags: z.string().trim().max(200).optional(),
       }),
       handler: async (input, ctx) => {
         const user = requireUser(ctx.locals);
@@ -208,6 +210,7 @@ export const server = {
             address: input.address || null,
             lat: coords?.lat ?? null,
             lng: coords?.lng ?? null,
+            tags: parseTagsInput(input.tags ?? ""),
             createdBy: user.name,
           }),
         );
@@ -223,6 +226,7 @@ export const server = {
         cuisine: z.string().trim().max(40).optional(),
         address: z.string().trim().max(200).optional(),
         coords: z.string().trim().max(60).optional(),
+        tags: z.string().trim().max(200).optional(),
       }),
       handler: async (input, ctx) => {
         requireAdmin(ctx.locals);
@@ -237,6 +241,7 @@ export const server = {
             address: input.address || null,
             lat: coords?.lat ?? null,
             lng: coords?.lng ?? null,
+            tags: parseTagsInput(input.tags ?? ""),
           }),
         );
       },

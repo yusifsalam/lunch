@@ -7,6 +7,7 @@ import { todayInfo } from "@/lib/lunch";
 import { formatPrice } from "@/lib/money";
 import { service } from "@/lib/service";
 import { TZ } from "@/lib/sessionService";
+import { parseTagsJson } from "@/lib/tags";
 
 // Editing can rename the place and thus change its slug; follow it so the
 // post-submit render doesn't 404 on the old URL.
@@ -54,6 +55,11 @@ const modeEmoji: Record<string, string> = {
         place.cuisine && (
           <span class="badge badge-outline">{place.cuisine}</span>
         )
+      }
+      {
+        parseTagsJson(place.tags).map((tag) => (
+          <span class="badge badge-soft">{tag}</span>
+        ))
       }
       {place.archived === 1 && <span class="badge badge-ghost">archived</span>}
       {
@@ -124,6 +130,18 @@ const modeEmoji: Record<string, string> = {
                   class="input input-bordered w-full"
                   maxlength="40"
                   value={place.cuisine ?? ""}
+                />
+              </label>
+              <label class="form-control">
+                <span class="label-text mb-1">
+                  Tags (optional, comma-separated)
+                </span>
+                <input
+                  name="tags"
+                  class="input input-bordered w-full"
+                  maxlength="200"
+                  placeholder="quick, terrace, vegan-friendly"
+                  value={parseTagsJson(place.tags).join(", ")}
                 />
               </label>
               <label class="form-control">

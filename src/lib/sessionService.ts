@@ -564,6 +564,7 @@ export function createService(db: Kysely<DB>, deps: ServiceDeps = {}) {
     address?: string | null;
     lat?: number | null;
     lng?: number | null;
+    tags?: string[];
   }) {
     try {
       const slug = await uniquePlaceSlug(input.name, input.id);
@@ -578,6 +579,7 @@ export function createService(db: Kysely<DB>, deps: ServiceDeps = {}) {
           address: input.address || null,
           lat: input.lat ?? null,
           lng: input.lng ?? null,
+          tags: JSON.stringify(input.tags ?? []),
         })
         .where("id", "=", input.id)
         .execute();

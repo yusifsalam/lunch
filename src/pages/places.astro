@@ -3,6 +3,7 @@ import Layout from "@/layouts/Layout.astro";
 import { actions } from "astro:actions";
 import { db } from "@/db/db";
 import { service } from "@/lib/service";
+import { parseTagsJson } from "@/lib/tags";
 
 const user = Astro.locals.user;
 const isAdmin = user.role === "admin";
@@ -79,6 +80,15 @@ const closedToday = await service.closedPlacesToday();
           />
         </label>
         <label class="form-control">
+          <span class="label-text mb-1">Tags (optional, comma-separated)</span>
+          <input
+            name="tags"
+            class="input input-bordered w-full"
+            maxlength="200"
+            placeholder="quick, terrace, vegan-friendly"
+          />
+        </label>
+        <label class="form-control">
           <span class="label-text mb-1">Address (optional)</span>
           <input
             name="address"
@@ -144,6 +154,9 @@ const closedToday = await service.closedPlacesToday();
                   {place.cuisine}
                 </span>
               )}
+              {parseTagsJson(place.tags).map((tag) => (
+                <span class="badge badge-soft badge-sm ml-2">{tag}</span>
+              ))}
               {place.url && (
                 <a
                   href={place.url}
