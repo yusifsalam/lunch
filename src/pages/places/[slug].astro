@@ -94,8 +94,8 @@ const modeEmoji: Record<string, string> = {
               class="flex flex-col gap-3"
             >
               <input type="hidden" name="id" value={place.id} />
-              <label class="form-control">
-                <span class="label-text mb-1">Name</span>
+              <label class="flex flex-col gap-1">
+                <span class="label-text">Name</span>
                 <input
                   name="name"
                   class="input input-bordered w-full"
@@ -104,8 +104,8 @@ const modeEmoji: Record<string, string> = {
                   value={place.name}
                 />
               </label>
-              <label class="form-control">
-                <span class="label-text mb-1">URL (optional)</span>
+              <label class="flex flex-col gap-1">
+                <span class="label-text">URL (optional)</span>
                 <input
                   name="url"
                   type="url"
@@ -114,8 +114,8 @@ const modeEmoji: Record<string, string> = {
                   value={place.url ?? ""}
                 />
               </label>
-              <label class="form-control">
-                <span class="label-text mb-1">Notes (optional)</span>
+              <label class="flex flex-col gap-1">
+                <span class="label-text">Notes (optional)</span>
                 <input
                   name="notes"
                   class="input input-bordered w-full"
@@ -123,8 +123,8 @@ const modeEmoji: Record<string, string> = {
                   value={place.notes ?? ""}
                 />
               </label>
-              <label class="form-control">
-                <span class="label-text mb-1">Cuisine</span>
+              <label class="flex flex-col gap-1">
+                <span class="label-text">Cuisine</span>
                 <input
                   name="cuisine"
                   list="cuisines"
@@ -133,10 +133,8 @@ const modeEmoji: Record<string, string> = {
                   value={place.cuisine ?? ""}
                 />
               </label>
-              <label class="form-control">
-                <span class="label-text mb-1">
-                  Tags (optional, comma-separated)
-                </span>
+              <label class="flex flex-col gap-1">
+                <span class="label-text">Tags (optional, comma-separated)</span>
                 <input
                   name="tags"
                   class="input input-bordered w-full"
@@ -145,8 +143,8 @@ const modeEmoji: Record<string, string> = {
                   value={parseTagsJson(place.tags).join(", ")}
                 />
               </label>
-              <label class="form-control">
-                <span class="label-text mb-1">Address (optional)</span>
+              <label class="flex flex-col gap-1">
+                <span class="label-text">Address (optional)</span>
                 <input
                   name="address"
                   class="input input-bordered w-full"
@@ -155,8 +153,8 @@ const modeEmoji: Record<string, string> = {
                   value={place.address ?? ""}
                 />
               </label>
-              <label class="form-control">
-                <span class="label-text mb-1">Coordinates</span>
+              <label class="flex flex-col gap-1">
+                <span class="label-text">Coordinates</span>
                 <input
                   name="coords"
                   class="input input-bordered w-full"
@@ -388,19 +386,19 @@ const modeEmoji: Record<string, string> = {
             <form
               method="POST"
               action={actions.places.addClosure}
-              class="mt-2 flex flex-wrap items-end gap-2"
+              class="mt-4 flex flex-wrap items-end gap-x-3 gap-y-2"
             >
               <input type="hidden" name="placeId" value={place.id} />
-              <div class="form-control">
-                <span class="label-text mb-1 text-xs">From</span>
+              <div class="flex flex-col gap-1">
+                <span class="label-text text-xs">From</span>
                 <DatePicker name="startDate" />
               </div>
-              <div class="form-control">
-                <span class="label-text mb-1 text-xs">To</span>
+              <div class="flex flex-col gap-1">
+                <span class="label-text text-xs">To</span>
                 <DatePicker name="endDate" />
               </div>
-              <label class="form-control">
-                <span class="label-text mb-1 text-xs">Reason</span>
+              <label class="flex flex-col gap-1">
+                <span class="label-text text-xs">Reason</span>
                 <input
                   name="reason"
                   class="input input-bordered input-sm"
@@ -498,11 +496,11 @@ const modeEmoji: Record<string, string> = {
         <form
           method="POST"
           action={actions.menu.addItem}
-          class="mt-2 flex flex-wrap items-end gap-2"
+          class="mt-4 flex flex-wrap items-end gap-x-3 gap-y-2"
         >
           <input type="hidden" name="placeId" value={place.id} />
-          <label class="form-control">
-            <span class="label-text mb-1 text-xs">Item (dish or buffet)</span>
+          <label class="flex flex-col gap-1">
+            <span class="label-text text-xs">Item (dish or buffet)</span>
             <input
               name="name"
               class="input input-bordered input-sm"
@@ -510,8 +508,8 @@ const modeEmoji: Record<string, string> = {
               maxlength="80"
             />
           </label>
-          <label class="form-control">
-            <span class="label-text mb-1 text-xs">Price €</span>
+          <label class="flex flex-col gap-1">
+            <span class="label-text text-xs">Price €</span>
             <input
               name="price"
               class="input input-bordered input-sm w-24"
