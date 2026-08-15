@@ -3,7 +3,7 @@ import { Kysely, SqliteDialect } from "kysely";
 import { beforeEach, describe, expect, it } from "vitest";
 import { migrate } from "@/db/migrate";
 import type { DB } from "@/db/types";
-import { createService, LunchError, type Service } from "./sessionService";
+import { createService, LunchError, type Service } from "./lunchService";
 
 // A weekday (Friday) / weekend in the service's hardcoded Helsinki timezone
 const FRIDAY = new Date("2026-08-14T09:00:00Z");

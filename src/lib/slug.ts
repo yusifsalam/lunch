@@ -69,7 +69,7 @@ const cryptoRng: Rng = () => randomInt(2 ** 31) / 2 ** 31;
 
 /**
  * Deterministic slug from a display name: "Café Motörhead & Co." → "cafe-motorhead-co".
- * Uniqueness is the caller's job (see uniquePlaceSlug in sessionService).
+ * Uniqueness is the caller's job (see uniquePlaceSlug in lunchService).
  */
 export function slugify(name: string): string {
   const base = name

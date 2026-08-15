@@ -28,7 +28,7 @@ Astro SSR (node standalone adapter) + Preact islands, Tailwind 4 + daisyUI, SQLi
 The code is layered so domain logic is testable without Astro or a real DB:
 
 1. **`src/lib/lunch.ts`** — pure functions (tally, pickWinner, decideFinalize, todayInfo). No DB, no I/O; randomness comes in as an injected `Rng`.
-2. **`src/lib/sessionService.ts`** — `createService(db, {now?, rng?})` factory holding all DB access and domain rules. Rule violations throw `LunchError` (its message is user-visible). Tests build a service against a `:memory:` SQLite with injected clock/rng.
+2. **`src/lib/lunchService.ts`** — `createService(db, {now?, rng?})` factory holding all DB access and domain rules. Rule violations throw `LunchError` (its message is user-visible). Tests build a service against a `:memory:` SQLite with injected clock/rng.
 3. **`src/lib/service.ts`** — the app-wide singleton binding `createService` to the real DB.
 4. **`src/actions/index.ts`** — all mutations as Astro Actions. They do auth (`requireUser`/`requireAdmin` on `ctx.locals`), input parsing (zod; helpers in `lib/geo.ts`, `lib/money.ts`), and convert `LunchError` → `ActionError`. Form-posting pages use `accept: "form"` actions.
 5. **UI** — `.astro` pages render server-side from `service`; the one interactive island, `src/components/SessionView.tsx`, holds a `Snapshot` and polls `GET /api/session/today` every 5s to stay live.
@@ -37,9 +37,9 @@ The code is layered so domain logic is testable without Astro or a real DB:
 
 **Database**: migrations are plain `.sql` files in `src/db/migrations/`, applied synchronously at module load of `src/db/db.ts` (tracked in a `migration` table; dir resolved from cwd, or `MIGRATIONS_DIR` in Docker — the image copies migrations separately since the source tree isn't shipped). The Kysely schema in `src/db/types.ts` is hand-maintained: a new migration must be mirrored there.
 
-**Time**: "today" and weekday-ness are computed in hardcoded `Europe/Helsinki` (`TZ` in sessionService). Timestamps are stored as ISO strings.
+**Time**: "today" and weekday-ness are computed in hardcoded `Europe/Helsinki` (`TZ` in lunchService). Timestamps are stored as ISO strings.
 
-## Domain invariants (encoded in sessionService — keep them)
+## Domain invariants (encoded in lunchService — keep them)
 
 - Join/leave stay allowed after finalization; only the decision (votes, mode, dictator) locks.
 - Votes and dictator designation survive a mode switch, making it reversible; finalize reads only current-mode data.

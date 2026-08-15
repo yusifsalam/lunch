@@ -5,7 +5,7 @@ import { parseCoords, type Coords } from "@/lib/geo";
 import { parseDateISO, parseTimeHHMM, WEEKDAY_NAMES } from "@/lib/hours";
 import { parsePriceCents } from "@/lib/money";
 import { service } from "@/lib/service";
-import { LunchError } from "@/lib/sessionService";
+import { LunchError } from "@/lib/lunchService";
 import { parseTagsInput } from "@/lib/tags";
 
 function requireUser(locals: App.Locals): AuthUser {

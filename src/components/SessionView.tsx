@@ -1,7 +1,7 @@
 import { actions } from "astro:actions";
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { AuthUser } from "@/lib/authCookie";
-import type { Snapshot } from "@/lib/sessionService";
+import type { Snapshot } from "@/lib/lunchService";
 
 interface Props {
   initial: Snapshot;
