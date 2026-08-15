@@ -1,0 +1,73 @@
+---
+// Cally-powered date picker (https://daisyui.com/components/calendar/).
+// Submits through a hidden input, so the server must validate the date —
+// the `required` attribute doesn't apply to hidden inputs.
+interface Props {
+  name: string;
+  value?: string;
+}
+
+const { name, value } = Astro.props;
+const pickerId = `datepicker-${name}`;
+---
+
+<span data-datepicker>
+  <input type="hidden" name={name} value={value} />
+  <button
+    type="button"
+    popovertarget={`${pickerId}-popover`}
+    class="input input-bordered input-sm w-34"
+    style={`anchor-name:--${pickerId}`}
+  >
+    <span class:list={["truncate", !value && "text-base-content/40"]}>
+      {value ?? "Pick a date"}
+    </span>
+  </button>
+  <div
+    popover
+    id={`${pickerId}-popover`}
+    class="dropdown bg-base-100 rounded-box shadow-lg"
+    style={`position-anchor:--${pickerId}`}
+  >
+    <calendar-date class="cally" value={value}>
+      <svg
+        aria-label="Previous"
+        class="size-4 fill-current"
+        slot="previous"
+        xmlns="http://www.w3.org/2000/svg"
+        viewBox="0 0 24 24"
+      >
+        <path d="M15.75 19.5 8.25 12l7.5-7.5"></path>
+      </svg>
+      <svg
+        aria-label="Next"
+        class="size-4 fill-current"
+        slot="next"
+        xmlns="http://www.w3.org/2000/svg"
+        viewBox="0 0 24 24"
+      >
+        <path d="m8.25 4.5 7.5 7.5-7.5 7.5"></path>
+      </svg>
+      <calendar-month></calendar-month>
+    </calendar-date>
+  </div>
+</span>
+
+<script>
+  import "cally";
+
+  for (const picker of document.querySelectorAll("[data-datepicker]")) {
+    const input = picker.querySelector<HTMLInputElement>("input[type=hidden]")!;
+    const label = picker.querySelector("button span")!;
+    const popover = picker.querySelector<HTMLElement>("[popover]")!;
+    const calendar = popover.querySelector<HTMLElement & { value: string }>(
+      "calendar-date",
+    )!;
+    calendar.addEventListener("change", () => {
+      input.value = calendar.value;
+      label.textContent = calendar.value;
+      label.classList.remove("text-base-content/40");
+      popover.hidePopover();
+    });
+  }
+</script>
