@@ -64,6 +64,16 @@ export default function SessionView({ initial, user }: Props) {
         <div class="card-body items-center py-16 text-center">
           <span class="text-4xl">🏖️</span>
           <p class="text-lg">No lunch session today — it's the weekend.</p>
+          {user.role === "admin" && (
+            <button
+              class="btn btn-primary btn-sm mt-2"
+              disabled={busy}
+              onClick={() => call(() => actions.lunch.forceStart())}
+            >
+              Start a session anyway
+            </button>
+          )}
+          {error && <div class="alert alert-error text-sm">{error}</div>}
         </div>
       </div>
     );

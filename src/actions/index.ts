@@ -137,6 +137,12 @@ export const server = {
         await run(() => service.reopen());
       },
     }),
+    forceStart: defineAction({
+      handler: async (_input, ctx) => {
+        requireAdmin(ctx.locals);
+        await run(() => service.forceStartToday());
+      },
+    }),
   },
   menu: {
     addItem: defineAction({

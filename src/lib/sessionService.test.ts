@@ -52,6 +52,35 @@ describe("session auto-creation", () => {
       0,
     );
   });
+
+  it("force start creates a weekend session that then counts as today's", async () => {
+    const weekend = makeService(SATURDAY);
+    const forced = await weekend.forceStartToday();
+    expect(forced.date).toBe("2026-08-15");
+    expect(forced.status).toBe("open");
+    expect((await weekend.getOrCreateToday())!.id).toBe(forced.id);
+  });
+
+  it("force start is idempotent and works after the session exists", async () => {
+    const weekend = makeService(SATURDAY);
+    const a = await weekend.forceStartToday();
+    const b = await weekend.forceStartToday();
+    expect(b.id).toBe(a.id);
+    expect(await db.selectFrom("session").selectAll().execute()).toHaveLength(
+      1,
+    );
+  });
+
+  it("a force-started weekend session supports the normal flow", async () => {
+    const weekend = makeService(SATURDAY);
+    await weekend.forceStartToday();
+    const [sushi] = await addPlaces("Sushi");
+    await weekend.vote("Ada", sushi!);
+    await weekend.finalize();
+    const s = (await weekend.getOrCreateToday())!;
+    expect(s.status).toBe("finalized");
+    expect(s.chosen_place_id).toBe(sushi);
+  });
 });
 
 describe("voting", () => {

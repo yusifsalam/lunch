@@ -20,10 +20,8 @@ export function createService(db: Kysely<DB>, deps: ServiceDeps = {}) {
   const now = deps.now ?? (() => new Date());
   const rng = deps.rng ?? Math.random;
 
-  /** Lazily creates today's session (weekdays only). Race-safe via UNIQUE(date). */
-  async function getOrCreateToday(): Promise<SessionRow | null> {
-    const { date, isWeekday } = todayInfo(now(), TZ);
-    if (!isWeekday) return null;
+  /** Creates the session for `date` if missing. Race-safe via UNIQUE(date). */
+  async function createSessionFor(date: string): Promise<SessionRow> {
     // A slug collision (~30 bits of entropy) is astronomically unlikely but
     // would surface as a UNIQUE violation on public_id — retry with a new one.
     for (let attempt = 0; ; attempt++) {
@@ -38,18 +36,40 @@ export function createService(db: Kysely<DB>, deps: ServiceDeps = {}) {
         if (attempt >= 2 || !String(e).includes("UNIQUE")) throw e;
       }
     }
-    const session = await db
+    return db
       .selectFrom("session")
       .selectAll()
       .where("date", "=", date)
       .executeTakeFirstOrThrow();
-    return session;
+  }
+
+  /** Lazily creates today's session (weekdays only). On weekends nothing is
+   * created, but a session an admin force-started still counts. */
+  async function getOrCreateToday(): Promise<SessionRow | null> {
+    const { date, isWeekday } = todayInfo(now(), TZ);
+    if (!isWeekday) {
+      const existing = await db
+        .selectFrom("session")
+        .selectAll()
+        .where("date", "=", date)
+        .executeTakeFirst();
+      return existing ?? null;
+    }
+    return createSessionFor(date);
+  }
+
+  /** Admin override: start today's session regardless of weekday. */
+  async function forceStartToday(): Promise<SessionRow> {
+    const { date } = todayInfo(now(), TZ);
+    return createSessionFor(date);
   }
 
   /** Today's session or a domain error — for mutations that require one. */
   async function requireToday(): Promise<SessionRow> {
     const session = await getOrCreateToday();
-    if (!session) throw new LunchError("No lunch session on weekends.");
+    if (!session) {
+      throw new LunchError("No lunch session today — an admin can start one.");
+    }
     return session;
   }
 
@@ -705,6 +725,7 @@ export function createService(db: Kysely<DB>, deps: ServiceDeps = {}) {
 
   return {
     getOrCreateToday,
+    forceStartToday,
     join,
     leave,
     vote,
