@@ -127,6 +127,16 @@ const modeEmoji: Record<string, string> = {
                 />
               </label>
               <label class="form-control">
+                <span class="label-text mb-1">Address (optional)</span>
+                <input
+                  name="address"
+                  class="input input-bordered w-full"
+                  maxlength="200"
+                  placeholder="Mannerheimintie 1, 00100 Helsinki"
+                  value={place.address ?? ""}
+                />
+              </label>
+              <label class="form-control">
                 <span class="label-text mb-1">Coordinates</span>
                 <input
                   name="coords"
@@ -193,9 +203,9 @@ const modeEmoji: Record<string, string> = {
         }
         {place.notes && <p class="text-base-content/80">{place.notes}</p>}
         {
-          place.lat !== null && place.lng !== null && (
+          (place.address || (place.lat !== null && place.lng !== null)) && (
             <p class="text-base-content/70 text-sm">
-              📍 {place.lat}, {place.lng}
+              📍 {place.address || `${place.lat}, ${place.lng}`}
             </p>
           )
         }
@@ -208,7 +218,14 @@ const modeEmoji: Record<string, string> = {
     {
       place.lat !== null && place.lng !== null && (
         <PlaceMap
-          markers={[{ lat: place.lat, lng: place.lng, name: place.name }]}
+          markers={[
+            {
+              lat: place.lat,
+              lng: place.lng,
+              name: place.name,
+              address: place.address ?? undefined,
+            },
+          ]}
         />
       )
     }

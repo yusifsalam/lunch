@@ -525,6 +525,7 @@ export function createService(db: Kysely<DB>, deps: ServiceDeps = {}) {
     url?: string | null;
     notes?: string | null;
     cuisine?: string | null;
+    address?: string | null;
     lat?: number | null;
     lng?: number | null;
     tags?: string[];
@@ -539,6 +540,7 @@ export function createService(db: Kysely<DB>, deps: ServiceDeps = {}) {
           url: input.url || null,
           notes: input.notes || null,
           cuisine: input.cuisine || null,
+          address: input.address || null,
           lat: input.lat ?? null,
           lng: input.lng ?? null,
           tags: JSON.stringify(input.tags ?? []),
@@ -559,6 +561,7 @@ export function createService(db: Kysely<DB>, deps: ServiceDeps = {}) {
     url?: string | null;
     notes?: string | null;
     cuisine?: string | null;
+    address?: string | null;
     lat?: number | null;
     lng?: number | null;
   }) {
@@ -572,6 +575,7 @@ export function createService(db: Kysely<DB>, deps: ServiceDeps = {}) {
           url: input.url || null,
           notes: input.notes || null,
           cuisine: input.cuisine || null,
+          address: input.address || null,
           lat: input.lat ?? null,
           lng: input.lng ?? null,
         })

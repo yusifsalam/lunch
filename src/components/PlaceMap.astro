@@ -4,6 +4,7 @@ export interface MapMarker {
   lng: number;
   name: string;
   slug?: string;
+  address?: string;
 }
 
 interface Props {
@@ -78,6 +79,7 @@ const { markers, class: className = "rounded-box h-64 shadow-sm" } =
     lng: number;
     name: string;
     slug?: string;
+    address?: string;
   }
 
   const STYLES = {
@@ -119,9 +121,18 @@ const { markers, class: className = "rounded-box h-64 shadow-sm" } =
           })
         : document.createElement("span");
       label.textContent = m.name;
+      const content = document.createElement("div");
+      content.append(label);
+      if (m.address) {
+        const address = Object.assign(document.createElement("div"), {
+          className: "text-base-content/70 text-xs",
+        });
+        address.textContent = m.address;
+        content.append(address);
+      }
       new maplibregl.Marker()
         .setLngLat([m.lng, m.lat])
-        .setPopup(new maplibregl.Popup({ offset: 24 }).setDOMContent(label))
+        .setPopup(new maplibregl.Popup({ offset: 24 }).setDOMContent(content))
         .addTo(map);
     }
 

@@ -12,6 +12,8 @@ export interface PlaceTable {
   notes: string | null;
   /** e.g. "sushi", "pizza", "buffet" — free text */
   cuisine: string | null;
+  /** Human-readable street address, free text */
+  address: string | null;
   lat: number | null;
   lng: number | null;
   /** JSON array of strings */

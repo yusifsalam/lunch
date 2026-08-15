@@ -193,6 +193,7 @@ export const server = {
         url: z.string().trim().url().max(300).or(z.literal("")).optional(),
         notes: z.string().trim().max(500).optional(),
         cuisine: z.string().trim().max(40).optional(),
+        address: z.string().trim().max(200).optional(),
         coords: z.string().trim().max(60).optional(),
       }),
       handler: async (input, ctx) => {
@@ -204,6 +205,7 @@ export const server = {
             url: input.url || null,
             notes: input.notes || null,
             cuisine: input.cuisine || null,
+            address: input.address || null,
             lat: coords?.lat ?? null,
             lng: coords?.lng ?? null,
             createdBy: user.name,
@@ -219,6 +221,7 @@ export const server = {
         url: z.string().trim().url().max(300).or(z.literal("")).optional(),
         notes: z.string().trim().max(500).optional(),
         cuisine: z.string().trim().max(40).optional(),
+        address: z.string().trim().max(200).optional(),
         coords: z.string().trim().max(60).optional(),
       }),
       handler: async (input, ctx) => {
@@ -231,6 +234,7 @@ export const server = {
             url: input.url || null,
             notes: input.notes || null,
             cuisine: input.cuisine || null,
+            address: input.address || null,
             lat: coords?.lat ?? null,
             lng: coords?.lng ?? null,
           }),

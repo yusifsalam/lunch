@@ -79,6 +79,15 @@ const closedToday = await service.closedPlacesToday();
           />
         </label>
         <label class="form-control">
+          <span class="label-text mb-1">Address (optional)</span>
+          <input
+            name="address"
+            class="input input-bordered w-full"
+            maxlength="200"
+            placeholder="Mannerheimintie 1, 00100 Helsinki"
+          />
+        </label>
+        <label class="form-control">
           <span class="label-text mb-1">Coordinates</span>
           <input
             name="coords"
@@ -158,6 +167,9 @@ const closedToday = await service.closedPlacesToday();
               )}
               {place.notes && (
                 <p class="text-base-content/70 text-sm">{place.notes}</p>
+              )}
+              {place.address && (
+                <p class="text-base-content/60 text-xs">📍 {place.address}</p>
               )}
               <p class="text-base-content/50 text-xs">
                 added by {place.created_by}
