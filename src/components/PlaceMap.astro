@@ -20,6 +20,34 @@ const { markers, class: className = "rounded-box h-64 shadow-sm" } = Astro.props
 >
 </div>
 
+<style is:global>
+  /* MapLibre's popup is hardcoded white; the link inside inherits the page's
+     base-content color, which is white in the dark theme. Re-skin the bubble
+     (and its tip, colored per anchor side) with the active theme's colors.
+     Scoped under .place-map so these outweigh maplibre-gl.css, which the
+     bundler injects after this block. */
+  .place-map .maplibregl-popup-content {
+    background: var(--color-base-100);
+    color: var(--color-base-content);
+  }
+  .place-map .maplibregl-popup-anchor-top .maplibregl-popup-tip,
+  .place-map .maplibregl-popup-anchor-top-left .maplibregl-popup-tip,
+  .place-map .maplibregl-popup-anchor-top-right .maplibregl-popup-tip {
+    border-bottom-color: var(--color-base-100);
+  }
+  .place-map .maplibregl-popup-anchor-bottom .maplibregl-popup-tip,
+  .place-map .maplibregl-popup-anchor-bottom-left .maplibregl-popup-tip,
+  .place-map .maplibregl-popup-anchor-bottom-right .maplibregl-popup-tip {
+    border-top-color: var(--color-base-100);
+  }
+  .place-map .maplibregl-popup-anchor-left .maplibregl-popup-tip {
+    border-right-color: var(--color-base-100);
+  }
+  .place-map .maplibregl-popup-anchor-right .maplibregl-popup-tip {
+    border-left-color: var(--color-base-100);
+  }
+</style>
+
 <script>
   import * as maplibregl from "maplibre-gl";
   import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
