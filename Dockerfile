@@ -1,8 +1,9 @@
 # syntax=docker/dockerfile:1
 
 # Multi-stage build for the Astro node standalone server (pnpm).
-# node:24-slim (glibc), not alpine: better-sqlite3 ships glibc prebuilds,
-# so the install needs no native toolchain.
+# node:24-slim: better-sqlite3 (v13+) ships prebuilds in its npm tarball, so
+# the install needs no native toolchain — as long as better-sqlite3 stays out
+# of pnpm.onlyBuiltDependencies, which would trigger a node-gyp source build.
 FROM node:24-slim AS base
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
