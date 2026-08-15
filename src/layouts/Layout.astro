@@ -1,5 +1,6 @@
 ---
 import "@/styles/global.css";
+import Nav from "@/components/Nav.astro";
 
 interface Props {
   title?: string;
@@ -7,8 +8,6 @@ interface Props {
 }
 
 const { title = "Lunch", fullBleed = false } = Astro.props;
-const user = Astro.locals.user;
-const path = Astro.url.pathname;
 ---
 
 <!doctype html>
@@ -18,59 +17,25 @@ const path = Astro.url.pathname;
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="robots" content="noindex" />
     <title>{title}</title>
+    <script is:inline>
+      // Apply the saved theme before first paint; without a saved choice the
+      // stylesheet's --prefersdark handling follows the system preference.
+      const theme = localStorage.getItem("theme");
+      if (theme === "emerald" || theme === "black") {
+        document.documentElement.dataset.theme = theme;
+      }
+    </script>
   </head>
   <body
-    class={fullBleed ? "bg-base-200 flex h-dvh flex-col" : "bg-base-200 min-h-screen"}
+    class={fullBleed
+      ? "bg-base-200 flex h-dvh flex-col"
+      : "bg-base-200 min-h-screen"}
   >
-    {
-      user && (
-        <nav class="navbar bg-base-100 shadow-sm">
-          <div class="mx-auto flex w-full max-w-3xl items-center px-4">
-            <div class="flex flex-1 items-center gap-1">
-              <a
-                href="/"
-                class={`btn btn-ghost btn-sm ${path === "/" ? "btn-active" : ""}`}
-              >
-                🍽️ Today
-              </a>
-              <a
-                href="/places"
-                class={`btn btn-ghost btn-sm ${path === "/places" ? "btn-active" : ""}`}
-              >
-                Places
-              </a>
-              <a
-                href="/map"
-                class={`btn btn-ghost btn-sm ${path === "/map" ? "btn-active" : ""}`}
-              >
-                Map
-              </a>
-              <a
-                href="/history"
-                class={`btn btn-ghost btn-sm ${path === "/history" ? "btn-active" : ""}`}
-              >
-                History
-              </a>
-            </div>
-            <div class="flex items-center gap-2">
-              <span class="text-sm">
-                {user.name}
-                {user.role === "admin" && (
-                  <span class="badge badge-warning badge-sm ml-1">admin</span>
-                )}
-              </span>
-              <form method="POST" action="/api/logout">
-                <button class="btn btn-ghost btn-sm" type="submit">
-                  Log out
-                </button>
-              </form>
-            </div>
-          </div>
-        </nav>
-      )
-    }
+    <Nav />
     <main
-      class={fullBleed ? "min-h-0 w-full flex-1" : "mx-auto w-full max-w-3xl p-4"}
+      class={fullBleed
+        ? "min-h-0 w-full flex-1"
+        : "mx-auto w-full max-w-3xl p-4"}
     >
       <slot />
     </main>

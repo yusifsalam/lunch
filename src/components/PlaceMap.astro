@@ -84,8 +84,14 @@ const { markers, class: className = "rounded-box h-64 shadow-sm" } =
     light: "https://tiles.openfreemap.org/styles/positron",
     dark: "https://tiles.openfreemap.org/styles/dark",
   };
+  // The nav's theme toggle sets data-theme on <html>; without it the page
+  // follows the system preference.
   const darkQuery = window.matchMedia("(prefers-color-scheme: dark)");
-  const styleFor = () => (darkQuery.matches ? STYLES.dark : STYLES.light);
+  const isDark = () => {
+    const theme = document.documentElement.dataset.theme;
+    return theme ? theme === "black" : darkQuery.matches;
+  };
+  const styleFor = () => (isDark() ? STYLES.dark : STYLES.light);
 
   for (const el of document.querySelectorAll<HTMLElement>(".place-map")) {
     const markers = JSON.parse(el.dataset.markers ?? "[]") as MapMarker[];
@@ -126,6 +132,17 @@ const { markers, class: className = "rounded-box h-64 shadow-sm" } =
     }
 
     // DOM markers survive setStyle, so no re-setup needed on theme change.
-    darkQuery.addEventListener("change", () => map.setStyle(styleFor()));
+    let currentStyle = styleFor();
+    const applyStyle = () => {
+      const next = styleFor();
+      if (next !== currentStyle) {
+        currentStyle = next;
+        map.setStyle(next);
+      }
+    };
+    darkQuery.addEventListener("change", applyStyle);
+    new MutationObserver(applyStyle).observe(document.documentElement, {
+      attributeFilter: ["data-theme"],
+    });
   }
 </script>

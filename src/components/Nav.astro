@@ -1,0 +1,35 @@
+---
+import NavLink from "./NavLink.astro";
+import ThemeToggle from "./ThemeToggle.astro";
+
+const user = Astro.locals.user;
+---
+
+{
+  user && (
+    <nav class="navbar bg-base-100 shadow-sm">
+      <div class="mx-auto flex w-full max-w-3xl items-center px-4">
+        <div class="flex flex-1 items-center gap-1">
+          <NavLink href="/">🍽️ Today</NavLink>
+          <NavLink href="/places">Places</NavLink>
+          <NavLink href="/map">Map</NavLink>
+          <NavLink href="/history">History</NavLink>
+        </div>
+        <div class="flex items-center gap-2">
+          <ThemeToggle />
+          <span class="text-sm">
+            {user.name}
+            {user.role === "admin" && (
+              <span class="badge badge-warning badge-sm ml-1">admin</span>
+            )}
+          </span>
+          <form method="POST" action="/api/logout">
+            <button class="btn btn-ghost btn-sm" type="submit">
+              Log out
+            </button>
+          </form>
+        </div>
+      </div>
+    </nav>
+  )
+}
