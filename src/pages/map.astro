@@ -21,36 +21,35 @@ const markers = located.map((p) => ({
 }));
 ---
 
-<Layout title="Map — Lunch">
-  <h1 class="mb-4 text-2xl font-bold">Map</h1>
-
+<Layout title="Map — Lunch" fullBleed>
   {
     located.length > 0 ? (
-      <PlaceMap markers={markers} class="h-[70vh]" />
-    ) : (
-      <div class="text-base-content/60 py-8 text-center">
-        No places have coordinates yet — add them on the{" "}
-        <a href="/places" class="link">
-          Places
-        </a>{" "}
-        page.
+      <div class="relative h-full">
+        <PlaceMap markers={markers} class="h-full" />
+        {missing.length > 0 && (
+          <p class="bg-base-100/80 text-base-content/70 rounded-box absolute bottom-2 left-2 z-10 max-w-sm px-3 py-2 text-xs shadow-sm backdrop-blur">
+            No coordinates yet:{" "}
+            {missing.map((p, i) => (
+              <>
+                {i > 0 && ", "}
+                <a href={`/places/${p.slug}`} class="link">
+                  {p.name}
+                </a>
+              </>
+            ))}
+          </p>
+        )}
       </div>
-    )
-  }
-
-  {
-    located.length > 0 && missing.length > 0 && (
-      <p class="text-base-content/60 mt-3 text-sm">
-        No coordinates yet:{" "}
-        {missing.map((p, i) => (
-          <>
-            {i > 0 && ", "}
-            <a href={`/places/${p.slug}`} class="link">
-              {p.name}
-            </a>
-          </>
-        ))}
-      </p>
+    ) : (
+      <div class="text-base-content/60 flex h-full items-center justify-center p-8 text-center">
+        <span>
+          No places have coordinates yet — add them on the{" "}
+          <a href="/places" class="link">
+            Places
+          </a>{" "}
+          page.
+        </span>
+      </div>
     )
   }
 </Layout>

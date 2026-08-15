@@ -209,7 +209,6 @@ const modeEmoji: Record<string, string> = {
       place.lat !== null && place.lng !== null && (
         <PlaceMap
           markers={[{ lat: place.lat, lng: place.lng, name: place.name }]}
-          class="h-64"
         />
       )
     }
