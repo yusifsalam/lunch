@@ -16,6 +16,10 @@ export interface DayHours {
   weekday: number;
   open_time: string;
   close_time: string;
+  /** Lunch window, independent of the (non-lunch) open–close range;
+   * both set or both null (not recorded) */
+  lunch_open: string | null;
+  lunch_close: string | null;
 }
 
 export interface Closure {
@@ -25,14 +29,20 @@ export interface Closure {
   reason: string;
 }
 
-/** "9:00" → "09:00". Null when not a valid 24h wall-clock time. */
+/**
+ * Lenient 24h wall-clock parse, normalized to 'HH:MM'. Accepts "9:00" and
+ * "9.00" (Finnish style), a bare hour ("11" → "11:00"), and the compact form
+ * ("1130" → "11:30"). Null when nothing valid matches.
+ */
 export function parseTimeHHMM(input: string): string | null {
-  const m = /^(\d{1,2}):(\d{2})$/.exec(input.trim());
+  const s = input.trim();
+  const m =
+    /^(\d{1,2})(?:[:.](\d{2}))?$/.exec(s) ?? /^(\d{1,2})(\d{2})$/.exec(s);
   if (!m) return null;
   const hours = Number(m[1]);
-  const minutes = Number(m[2]);
-  if (hours > 23 || minutes > 59) return null;
-  return `${String(hours).padStart(2, "0")}:${m[2]}`;
+  const minutes = m[2] ?? "00";
+  if (hours > 23 || Number(minutes) > 59) return null;
+  return `${String(hours).padStart(2, "0")}:${minutes}`;
 }
 
 /** Validates a real calendar date; returns normalized 'YYYY-MM-DD' or null. */
@@ -48,9 +58,11 @@ export function parseDateISO(input: string): string | null {
 }
 
 /**
- * Why the place is closed today, or null if it's open. A place with no hours
- * rows at all has unknown hours and counts as open; an active closure's
- * reason wins over the weekly schedule.
+ * Why the place is unavailable for lunch today, or null if it's open. A place
+ * with no hours rows at all has unknown hours and counts as open; an active
+ * closure's reason wins over the weekly schedule. Lunch windows follow the
+ * same unknown-vs-explicit rule as day rows: once any day has one, a day
+ * without one means no lunch is served that day.
  */
 export function closedReason(
   hours: DayHours[],
@@ -61,8 +73,12 @@ export function closedReason(
     (c) => c.start_date <= today.date && today.date <= c.end_date,
   );
   if (closure) return closure.reason;
-  if (hours.length > 0 && !hours.some((h) => h.weekday === today.weekday)) {
+  const todayRow = hours.find((h) => h.weekday === today.weekday);
+  if (hours.length > 0 && !todayRow) {
     return `closed on ${WEEKDAY_NAMES[today.weekday - 1]}s`;
+  }
+  if (todayRow && !todayRow.lunch_open && hours.some((h) => h.lunch_open)) {
+    return `no lunch on ${WEEKDAY_NAMES[today.weekday - 1]}s`;
   }
   return null;
 }

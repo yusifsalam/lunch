@@ -682,7 +682,14 @@ describe("opening hours and closures", () => {
     });
     const detail = (await service.placeDetail("sushi"))!;
     expect(detail.hours).toEqual([
-      { place_id: a, weekday: 1, open_time: "11:00", close_time: "14:00" },
+      {
+        place_id: a,
+        weekday: 1,
+        open_time: "11:00",
+        close_time: "14:00",
+        lunch_open: null,
+        lunch_close: null,
+      },
     ]);
     expect(detail.closures[0]).toMatchObject({
       start_date: "2026-09-01",
@@ -726,6 +733,50 @@ describe("opening hours and closures", () => {
     expect((await service.getOrCreateToday())!.chosen_place_id).toBe(b);
   });
 
+  it("a place serving lunch on other days but not today is excluded", async () => {
+    const [a] = await addPlaces("Sushi");
+    // Lunch window on Monday only; Friday (today) is open but lunch-less.
+    await service.setPlaceHours(a!, [
+      {
+        weekday: 1,
+        open: "09:00",
+        close: "21:00",
+        lunchOpen: "11:00",
+        lunchClose: "14:00",
+      },
+      { weekday: 5, open: "09:00", close: "21:00" },
+    ]);
+    await expect(service.vote("Ada", a!)).rejects.toThrow(
+      /no lunch on Fridays/,
+    );
+    // Add Friday's lunch window and the place is votable again.
+    await service.setPlaceHours(a!, [
+      {
+        weekday: 5,
+        open: "09:00",
+        close: "21:00",
+        lunchOpen: "11:00",
+        lunchClose: "14:00",
+      },
+    ]);
+    await service.vote("Ada", a!);
+  });
+
+  it("lunch may fall outside the non-lunch opening hours", async () => {
+    // Kitchen break: lunch 11–14, then evening service 17–22.
+    const [a] = await addPlaces("Sushi");
+    await service.setPlaceHours(a!, [
+      {
+        weekday: 5,
+        open: "17:00",
+        close: "22:00",
+        lunchOpen: "11:00",
+        lunchClose: "14:00",
+      },
+    ]);
+    await service.vote("Ada", a!);
+  });
+
   it("rejects invalid hours and closure ranges", async () => {
     const [a] = await addPlaces("Sushi");
     await expect(
@@ -733,6 +784,22 @@ describe("opening hours and closures", () => {
         { weekday: 5, open: "14:00", close: "11:00" },
       ]),
     ).rejects.toThrow(/before closing/);
+    await expect(
+      service.setPlaceHours(a!, [
+        { weekday: 5, open: "11:00", close: "14:00", lunchOpen: "11:00" },
+      ]),
+    ).rejects.toThrow(/both lunch times/);
+    await expect(
+      service.setPlaceHours(a!, [
+        {
+          weekday: 5,
+          open: "11:00",
+          close: "14:00",
+          lunchOpen: "13:00",
+          lunchClose: "12:00",
+        },
+      ]),
+    ).rejects.toThrow(/lunch start must be before/);
     await expect(
       service.addClosure({
         placeId: a!,

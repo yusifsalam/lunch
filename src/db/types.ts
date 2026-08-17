@@ -31,6 +31,10 @@ export interface PlaceHoursTable {
   /** 'HH:MM' 24h Helsinki wall-clock */
   open_time: string;
   close_time: string;
+  /** Lunch window, independent of the (non-lunch) open–close range;
+   * both set or both null (not recorded) */
+  lunch_open: string | null;
+  lunch_close: string | null;
 }
 
 export interface PlaceClosureTable {

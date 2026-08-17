@@ -122,7 +122,7 @@ export function createService(db: Kysely<DB>, deps: ServiceDeps = {}) {
       throw new LunchError("That place doesn't exist (or is archived).");
     const closed = (await closedToday()).get(placeId);
     if (closed) {
-      throw new LunchError(`That place is closed today (${closed}).`);
+      throw new LunchError(`That place isn't available today (${closed}).`);
     }
     await join(name);
     await db
@@ -169,7 +169,7 @@ export function createService(db: Kysely<DB>, deps: ServiceDeps = {}) {
       .execute();
   }
 
-  /** placeId → reason, for places closed today (weekly schedule or closure). */
+  /** placeId → reason, for places unavailable today (schedule, lunch window, or closure). */
   async function closedToday(): Promise<Map<number, string>> {
     const today = todayInfo(now(), TZ);
     const hours = await db.selectFrom("place_hours").selectAll().execute();
@@ -268,7 +268,7 @@ export function createService(db: Kysely<DB>, deps: ServiceDeps = {}) {
       throw new LunchError("That place doesn't exist (or is archived).");
     const closed = (await closedToday()).get(placeId);
     if (closed) {
-      throw new LunchError(`That place is closed today (${closed}).`);
+      throw new LunchError(`That place isn't available today (${closed}).`);
     }
     await db
       .updateTable("session")
@@ -633,7 +633,13 @@ export function createService(db: Kysely<DB>, deps: ServiceDeps = {}) {
   /** Full overwrite, like editPlace: days missing from `hours` become closed. */
   async function setPlaceHours(
     placeId: number,
-    hours: { weekday: number; open: string; close: string }[],
+    hours: {
+      weekday: number;
+      open: string;
+      close: string;
+      lunchOpen?: string | null;
+      lunchClose?: string | null;
+    }[],
   ) {
     const place = await db
       .selectFrom("place")
@@ -642,10 +648,25 @@ export function createService(db: Kysely<DB>, deps: ServiceDeps = {}) {
       .executeTakeFirst();
     if (!place) throw new LunchError("That place doesn't exist.");
     for (const h of hours) {
+      const name = WEEKDAY_NAMES[h.weekday - 1];
       if (h.open >= h.close) {
         throw new LunchError(
-          `${WEEKDAY_NAMES[h.weekday - 1]}: opening time must be before closing time.`,
+          `${name}: opening time must be before closing time.`,
         );
+      }
+      const lunchOpen = h.lunchOpen ?? null;
+      const lunchClose = h.lunchClose ?? null;
+      if ((lunchOpen === null) !== (lunchClose === null)) {
+        throw new LunchError(`${name}: fill both lunch times, or neither.`);
+      }
+      // No containment check against open–close: those are the non-lunch
+      // hours, and kitchens may pause between lunch and evening service.
+      if (
+        lunchOpen !== null &&
+        lunchClose !== null &&
+        lunchOpen >= lunchClose
+      ) {
+        throw new LunchError(`${name}: lunch start must be before lunch end.`);
       }
     }
     await db
@@ -661,6 +682,8 @@ export function createService(db: Kysely<DB>, deps: ServiceDeps = {}) {
             weekday: h.weekday,
             open_time: h.open,
             close_time: h.close,
+            lunch_open: h.lunchOpen ?? null,
+            lunch_close: h.lunchClose ?? null,
           })),
         )
         .execute();

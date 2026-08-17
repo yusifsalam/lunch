@@ -283,53 +283,89 @@ export const server = {
       accept: "form",
       input: z.object({
         placeId: z.number().int().positive(),
-        // Field suffix = ISO weekday (1=Mon … 7=Sun); a day with both
-        // fields blank is closed that day.
+        // Field suffix = ISO weekday (1=Mon … 7=Sun); a day with all four
+        // fields blank is closed that day. Lunch fields are optional.
         open1: optionalTime,
         close1: optionalTime,
+        lunchOpen1: optionalTime,
+        lunchClose1: optionalTime,
         open2: optionalTime,
         close2: optionalTime,
+        lunchOpen2: optionalTime,
+        lunchClose2: optionalTime,
         open3: optionalTime,
         close3: optionalTime,
+        lunchOpen3: optionalTime,
+        lunchClose3: optionalTime,
         open4: optionalTime,
         close4: optionalTime,
+        lunchOpen4: optionalTime,
+        lunchClose4: optionalTime,
         open5: optionalTime,
         close5: optionalTime,
+        lunchOpen5: optionalTime,
+        lunchClose5: optionalTime,
         open6: optionalTime,
         close6: optionalTime,
+        lunchOpen6: optionalTime,
+        lunchClose6: optionalTime,
         open7: optionalTime,
         close7: optionalTime,
+        lunchOpen7: optionalTime,
+        lunchClose7: optionalTime,
       }),
       handler: async (input, ctx) => {
         requireAdmin(ctx.locals);
         const days = [
-          [input.open1, input.close1],
-          [input.open2, input.close2],
-          [input.open3, input.close3],
-          [input.open4, input.close4],
-          [input.open5, input.close5],
-          [input.open6, input.close6],
-          [input.open7, input.close7],
+          [input.open1, input.close1, input.lunchOpen1, input.lunchClose1],
+          [input.open2, input.close2, input.lunchOpen2, input.lunchClose2],
+          [input.open3, input.close3, input.lunchOpen3, input.lunchClose3],
+          [input.open4, input.close4, input.lunchOpen4, input.lunchClose4],
+          [input.open5, input.close5, input.lunchOpen5, input.lunchClose5],
+          [input.open6, input.close6, input.lunchOpen6, input.lunchClose6],
+          [input.open7, input.close7, input.lunchOpen7, input.lunchClose7],
         ];
-        const hours: { weekday: number; open: string; close: string }[] = [];
+        const hours: {
+          weekday: number;
+          open: string;
+          close: string;
+          lunchOpen: string | null;
+          lunchClose: string | null;
+        }[] = [];
         for (let weekday = 1; weekday <= 7; weekday++) {
-          const [openRaw, closeRaw] = days[weekday - 1];
-          if (!openRaw && !closeRaw) continue;
+          const dayName = WEEKDAY_NAMES[weekday - 1];
+          const [openRaw, closeRaw, lunchOpenRaw, lunchCloseRaw] =
+            days[weekday - 1];
+          if (!openRaw && !closeRaw && !lunchOpenRaw && !lunchCloseRaw) {
+            continue;
+          }
           if (!openRaw || !closeRaw) {
             throw new ActionError({
               code: "BAD_REQUEST",
-              message: `Fill both open and close for ${WEEKDAY_NAMES[weekday - 1]}, or neither.`,
+              message:
+                lunchOpenRaw || lunchCloseRaw
+                  ? `Set opening hours for ${dayName} too — lunch hours alone aren't enough.`
+                  : `Fill both open and close for ${dayName}, or neither.`,
             });
           }
           const open = parseTimeHHMM(openRaw);
           const close = parseTimeHHMM(closeRaw);
-          if (!open || !close) {
+          const lunchOpen = lunchOpenRaw ? parseTimeHHMM(lunchOpenRaw) : null;
+          const lunchClose = lunchCloseRaw
+            ? parseTimeHHMM(lunchCloseRaw)
+            : null;
+          if (
+            !open ||
+            !close ||
+            (lunchOpenRaw && !lunchOpen) ||
+            (lunchCloseRaw && !lunchClose)
+          ) {
             throw new ActionError({
               code: "BAD_REQUEST",
               message: "Use a time like 11:00.",
             });
           }
-          hours.push({ weekday, open, close });
+          hours.push({ weekday, open, close, lunchOpen, lunchClose });
         }
         await run(() => service.setPlaceHours(input.placeId, hours));
       },

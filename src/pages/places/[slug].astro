@@ -65,7 +65,7 @@ const modeEmoji: Record<string, string> = {
       {place.archived === 1 && <span class="badge badge-ghost">archived</span>}
       {
         closedReason && (
-          <span class="badge badge-warning">closed today — {closedReason}</span>
+          <span class="badge badge-warning">today: {closedReason}</span>
         )
       }
       {
@@ -274,14 +274,24 @@ const modeEmoji: Record<string, string> = {
               No hours set — assumed open every day.
             </p>
           ) : (
-            <ul class="flex flex-col gap-0.5 text-sm sm:w-64">
+            <ul class="flex flex-col gap-0.5 text-sm">
               {WEEKDAY_NAMES.map((name, i) => {
                 const h = hours.find((r) => r.weekday === i + 1);
+                const hasLunch = hours.some((r) => r.lunch_open);
                 return (
-                  <li class="flex justify-between">
-                    <span>{name}</span>
+                  <li class="flex">
+                    <span class="w-28">{name}</span>
                     <span class={h ? "" : "text-base-content/50"}>
                       {h ? `${h.open_time}–${h.close_time}` : "Closed"}
+                      {h?.lunch_open && (
+                        <span class="text-base-content/60">
+                          {" "}
+                          · lunch {h.lunch_open}–{h.lunch_close}
+                        </span>
+                      )}
+                      {h && !h.lunch_open && hasLunch && (
+                        <span class="text-base-content/50"> · no lunch</span>
+                      )}
                     </span>
                   </li>
                 );
@@ -298,49 +308,90 @@ const modeEmoji: Record<string, string> = {
               <form
                 method="POST"
                 action={actions.places.setHours}
-                class="flex flex-col gap-1 py-2"
+                class="flex flex-col gap-2 overflow-x-auto py-2"
               >
                 <input type="hidden" name="placeId" value={place.id} />
-                {WEEKDAY_NAMES.map((name, i) => {
-                  const h = hours.find((r) => r.weekday === i + 1);
-                  return (
-                    <label class="flex items-center gap-2 text-sm">
-                      <span class="w-24">{name}</span>
-                      <input
-                        type="time"
-                        name={`open${i + 1}`}
-                        class="input input-bordered input-xs"
-                        value={h?.open_time ?? ""}
-                      />
-                      <span>–</span>
-                      <input
-                        type="time"
-                        name={`close${i + 1}`}
-                        class="input input-bordered input-xs"
-                        value={h?.close_time ?? ""}
-                      />
-                      <button
-                        type="button"
-                        class:list={[
-                          "btn btn-ghost btn-xs",
-                          i === 0 && "invisible",
-                        ]}
-                        title={
-                          i > 0
-                            ? `Copy ${WEEKDAY_NAMES[i - 1]}'s hours`
-                            : undefined
-                        }
-                        onclick={`this.form.open${i + 1}.value = this.form.open${i}.value; this.form.close${i + 1}.value = this.form.close${i}.value;`}
-                        disabled={i === 0}
-                      >
-                        ↑ copy
-                      </button>
-                    </label>
-                  );
-                })}
+                <div class="grid w-fit grid-cols-[auto_repeat(3,auto)_1rem_repeat(3,auto)_auto] items-center gap-x-1.5 gap-y-1 text-sm">
+                  <span />
+                  <span class="text-base-content/50 col-span-3 text-center text-xs">
+                    open
+                  </span>
+                  <span />
+                  <span class="text-base-content/50 col-span-3 text-center text-xs">
+                    lunch
+                  </span>
+                  <span />
+                  {WEEKDAY_NAMES.map((name, i) => {
+                    const h = hours.find((r) => r.weekday === i + 1);
+                    return (
+                      <>
+                        <span class="pr-2">{name}</span>
+                        {/* type="text", not "time": native time inputs ignore
+                            placeholder and paint their own hint text. */}
+                        <input
+                          type="text"
+                          inputmode="numeric"
+                          maxlength="5"
+                          placeholder="10:00"
+                          name={`open${i + 1}`}
+                          class="input input-bordered input-xs w-20"
+                          value={h?.open_time ?? ""}
+                        />
+                        <span class="text-base-content/50">–</span>
+                        <input
+                          type="text"
+                          inputmode="numeric"
+                          maxlength="5"
+                          placeholder="20:00"
+                          name={`close${i + 1}`}
+                          class="input input-bordered input-xs w-20"
+                          value={h?.close_time ?? ""}
+                        />
+                        <span />
+                        <input
+                          type="text"
+                          inputmode="numeric"
+                          maxlength="5"
+                          placeholder="11:00"
+                          name={`lunchOpen${i + 1}`}
+                          class="input input-bordered input-xs w-20"
+                          value={h?.lunch_open ?? ""}
+                        />
+                        <span class="text-base-content/50">–</span>
+                        <input
+                          type="text"
+                          inputmode="numeric"
+                          maxlength="5"
+                          placeholder="14:00"
+                          name={`lunchClose${i + 1}`}
+                          class="input input-bordered input-xs w-20"
+                          value={h?.lunch_close ?? ""}
+                        />
+                        <button
+                          type="button"
+                          class:list={[
+                            "btn btn-ghost btn-xs",
+                            i === 0 && "invisible",
+                          ]}
+                          title={
+                            i > 0
+                              ? `Copy ${WEEKDAY_NAMES[i - 1]}'s hours`
+                              : undefined
+                          }
+                          onclick={`this.form.open${i + 1}.value = this.form.open${i}.value; this.form.close${i + 1}.value = this.form.close${i}.value; this.form.lunchOpen${i + 1}.value = this.form.lunchOpen${i}.value; this.form.lunchClose${i + 1}.value = this.form.lunchClose${i}.value;`}
+                          disabled={i === 0}
+                        >
+                          ↑ copy
+                        </button>
+                      </>
+                    );
+                  })}
+                </div>
                 <p class="text-base-content/50 text-xs">
-                  Leave both fields empty for a day the place is closed; clear
-                  every field if the hours are unknown.
+                  Leave a day's fields empty if the place is closed that day;
+                  clear every field if the hours are unknown. Lunch times are
+                  optional, but once any day has them, a day without is treated
+                  as not serving lunch.
                 </p>
                 <button class="btn btn-primary btn-sm self-start" type="submit">
                   Save hours

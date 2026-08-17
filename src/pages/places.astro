@@ -171,11 +171,8 @@ const closedToday = await service.closedPlacesToday();
                 <span class="badge badge-ghost badge-sm ml-2">archived</span>
               )}
               {closedToday.has(place.id) && (
-                <span
-                  class="badge badge-warning badge-sm ml-2"
-                  title={closedToday.get(place.id)}
-                >
-                  closed today
+                <span class="badge badge-warning badge-sm ml-2">
+                  today: {closedToday.get(place.id)}
                 </span>
               )}
               {place.notes && (

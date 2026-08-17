@@ -47,3 +47,4 @@ The code is layered so domain logic is testable without Astro or a real DB:
 - Reopening a session keeps votes/participants so re-finalizing re-tallies.
 - Recording an unchanged price is a no-op — price history stores changes only.
 - A place closed today (weekly hours skip today's weekday, or an active closure) is excluded from voting/tallying like an archived place. "Closed" is date-based, never time-of-day; a place with zero hours rows is assumed open.
+- A day's hours may include an optional lunch window (`lunch_open`/`lunch_close`). It is independent of open–close (which are the _non-lunch_ opening hours — kitchens may pause between lunch and evening service), so no containment between the two ranges. Same unknown-vs-explicit rule as day rows: once any day has a lunch window, a day without one means no lunch served, and the place is excluded that weekday ("no lunch on Fridays"). A place with no lunch windows at all is assumed to serve lunch whenever open.
