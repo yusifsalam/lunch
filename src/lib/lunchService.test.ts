@@ -777,13 +777,15 @@ describe("opening hours and closures", () => {
     await service.vote("Ada", a!);
   });
 
+  it("accepts hours closing past midnight", async () => {
+    const [a] = await addPlaces("Sushi");
+    await service.setPlaceHours(a!, [
+      { weekday: 5, open: "10:00", close: "02:00" },
+    ]);
+  });
+
   it("rejects invalid hours and closure ranges", async () => {
     const [a] = await addPlaces("Sushi");
-    await expect(
-      service.setPlaceHours(a!, [
-        { weekday: 5, open: "14:00", close: "11:00" },
-      ]),
-    ).rejects.toThrow(/before closing/);
     await expect(
       service.setPlaceHours(a!, [
         { weekday: 5, open: "11:00", close: "14:00", lunchOpen: "11:00" },

@@ -649,11 +649,7 @@ export function createService(db: Kysely<DB>, deps: ServiceDeps = {}) {
     if (!place) throw new LunchError("That place doesn't exist.");
     for (const h of hours) {
       const name = WEEKDAY_NAMES[h.weekday - 1];
-      if (h.open >= h.close) {
-        throw new LunchError(
-          `${name}: opening time must be before closing time.`,
-        );
-      }
+      // No open < close check: close past midnight (e.g. 10:00–02:00) is valid.
       const lunchOpen = h.lunchOpen ?? null;
       const lunchClose = h.lunchClose ?? null;
       if ((lunchOpen === null) !== (lunchClose === null)) {
