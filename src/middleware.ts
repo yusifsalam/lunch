@@ -2,11 +2,23 @@ import { defineMiddleware, sequence } from "astro:middleware";
 import { getActionContext } from "astro:actions";
 import { verify } from "@/lib/authCookie";
 import { env } from "@/lib/env";
+import { serviceFor, tenantService } from "@/lib/service";
 
 export const AUTH_COOKIE = "lunch_auth";
 const ACTION_RESULT_COOKIE = "lunch_action_result";
 
-const auth = defineMiddleware((context, next) => {
+/** 401 JSON for API/action paths; null = caller should redirect to /login. */
+function unauthorized(pathname: string) {
+  if (pathname.startsWith("/api/") || pathname.startsWith("/_actions/")) {
+    return new Response(JSON.stringify({ error: "unauthorized" }), {
+      status: 401,
+      headers: { "content-type": "application/json" },
+    });
+  }
+  return null;
+}
+
+const auth = defineMiddleware(async (context, next) => {
   const { pathname } = context.url;
 
   // /login handles its own GET and POST; everything else requires auth.
@@ -18,16 +30,35 @@ const auth = defineMiddleware((context, next) => {
   const user = cookie ? verify(cookie, env.SESSION_SECRET) : null;
 
   if (!user) {
-    if (pathname.startsWith("/api/") || pathname.startsWith("/_actions/")) {
-      return new Response(JSON.stringify({ error: "unauthorized" }), {
-        status: 401,
-        headers: { "content-type": "application/json" },
-      });
+    return unauthorized(pathname) ?? context.redirect("/login");
+  }
+
+  const onTenantsPages =
+    pathname === "/tenants" || pathname.startsWith("/tenants/");
+
+  if (user.role === "superadmin") {
+    // Management only: superadmin sees /tenants and can log out; the lunch
+    // pages have no tenant to render for them.
+    const allowed =
+      onTenantsPages ||
+      pathname === "/api/logout" ||
+      pathname.startsWith("/_actions/");
+    if (!allowed) return context.redirect("/tenants");
+  } else {
+    // A deleted tenant invalidates its users' cookies on their next request.
+    const tenant = await tenantService.getTenant(user.tenantId!);
+    if (!tenant) {
+      context.cookies.delete(AUTH_COOKIE, { path: "/" });
+      return unauthorized(pathname) ?? context.redirect("/login");
     }
-    return context.redirect("/login");
+    if (onTenantsPages) return context.redirect("/");
+    context.locals.tenant = { id: tenant.id, name: tenant.name };
   }
 
   context.locals.user = user;
+  context.locals.service = serviceFor(
+    user.role === "superadmin" ? undefined : user.tenantId,
+  );
   return next();
 });
 

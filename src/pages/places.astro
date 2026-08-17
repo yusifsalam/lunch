@@ -2,7 +2,6 @@
 import Layout from "@/layouts/Layout.astro";
 import { actions } from "astro:actions";
 import { db } from "@/db/db";
-import { service } from "@/lib/service";
 import { parseTagsJson } from "@/lib/tags";
 
 const user = Astro.locals.user;
@@ -19,7 +18,7 @@ const places = await db
   .orderBy("archived")
   .orderBy("name")
   .execute();
-const closedToday = await service.closedPlacesToday();
+const closedToday = await Astro.locals.service.closedPlacesToday();
 ---
 
 <Layout title="Places — Lunch">

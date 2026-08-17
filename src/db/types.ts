@@ -3,6 +3,15 @@ import type { Generated } from "kysely";
 export type SessionMode = "democracy" | "dictatorship" | "random";
 export type SessionStatus = "open" | "finalized";
 
+export interface TenantTable {
+  id: Generated<number>;
+  name: string;
+  /** NULL = that role can't log in; the Default tenant is backfilled from env at boot */
+  site_passcode: string | null;
+  admin_passcode: string | null;
+  created_at: Generated<string>;
+}
+
 export interface PlaceTable {
   id: Generated<number>;
   name: string;
@@ -77,8 +86,15 @@ export interface SessionTable {
   id: Generated<number>;
   /** Short non-guessable slug for URLs, e.g. "zesty-taco-7k2m" */
   public_id: string;
+  tenant_id: number;
   /** 'YYYY-MM-DD' in Europe/Helsinki time */
   date: string;
+  /** NULL = the auto-created default train; named trains are user-created */
+  name: string | null;
+  /** SQLite boolean: 0 | 1 */
+  is_default: Generated<number>;
+  /** NULL = auto-created → managed by admins only */
+  created_by: string | null;
   mode: Generated<SessionMode>;
   status: Generated<SessionStatus>;
   dictator_name: string | null;
@@ -101,6 +117,7 @@ export interface VoteTable {
 }
 
 export interface DB {
+  tenant: TenantTable;
   place: PlaceTable;
   place_hours: PlaceHoursTable;
   place_closure: PlaceClosureTable;

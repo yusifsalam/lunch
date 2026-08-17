@@ -11,7 +11,15 @@ export class LunchError extends Error {}
 
 export const TZ = "Europe/Helsinki";
 
+/** Who is asking, for train-management authorization (creator-or-admin). */
+export interface Actor {
+  name: string;
+  isAdmin: boolean;
+}
+
 export interface ServiceDeps {
+  /** Omitted = a tenantless service (superadmin): session methods throw. */
+  tenantId?: number;
   now?: () => Date;
   rng?: Rng;
 }
@@ -19,82 +27,215 @@ export interface ServiceDeps {
 export function createService(db: Kysely<DB>, deps: ServiceDeps = {}) {
   const now = deps.now ?? (() => new Date());
   const rng = deps.rng ?? Math.random;
+  const tenantId = deps.tenantId;
 
-  /** Creates the session for `date` if missing. Race-safe via UNIQUE(date). */
-  async function createSessionFor(date: string): Promise<SessionRow> {
+  function requireTenant(): number {
+    if (tenantId === undefined) {
+      throw new LunchError("No tenant in scope.");
+    }
+    return tenantId;
+  }
+
+  /** Creates the default train for `date` if missing. Race-safe via the
+   * partial unique index on (tenant_id, date) WHERE is_default = 1 — an
+   * ON CONFLICT target can't express a partial index (its WHERE clause
+   * would be a bound parameter, which SQLite rejects), so losing the race
+   * surfaces as a UNIQUE violation on that index and simply means done. */
+  async function createDefaultFor(date: string): Promise<SessionRow> {
+    const tenant = requireTenant();
+    // Check first: this runs on every snapshot poll, and the insert path
+    // would burn a slug (rng draws) per call even when losing to UNIQUE.
+    const existing = await db
+      .selectFrom("session")
+      .selectAll()
+      .where("tenant_id", "=", tenant)
+      .where("date", "=", date)
+      .where("is_default", "=", 1)
+      .executeTakeFirst();
+    if (existing) return existing;
     // A slug collision (~30 bits of entropy) is astronomically unlikely but
     // would surface as a UNIQUE violation on public_id — retry with a new one.
     for (let attempt = 0; ; attempt++) {
       try {
         await db
           .insertInto("session")
-          .values({ date, public_id: generateSlug(deps.rng) })
-          .onConflict((oc) => oc.column("date").doNothing())
+          .values({
+            tenant_id: tenant,
+            date,
+            is_default: 1,
+            public_id: generateSlug(deps.rng),
+          })
           .execute();
         break;
       } catch (e) {
-        if (attempt >= 2 || !String(e).includes("UNIQUE")) throw e;
+        // Violations are reported by column list: the default-train index as
+        // "session.tenant_id, session.date", a slug collision as
+        // "session.public_id".
+        const msg = String(e);
+        if (msg.includes("session.date")) break;
+        if (attempt >= 2 || !msg.includes("UNIQUE")) throw e;
       }
     }
     return db
       .selectFrom("session")
       .selectAll()
+      .where("tenant_id", "=", tenant)
       .where("date", "=", date)
+      .where("is_default", "=", 1)
       .executeTakeFirstOrThrow();
   }
 
-  /** Lazily creates today's session (weekdays only). On weekends nothing is
-   * created, but a session an admin force-started still counts. */
-  async function getOrCreateToday(): Promise<SessionRow | null> {
+  /** Today's trains, default first. Lazily creates the default train on
+   * weekdays; on weekends nothing is created, but trains an admin
+   * force-started (plus any named ones) still count. */
+  async function todayTrains(): Promise<SessionRow[]> {
     const { date, isWeekday } = todayInfo(now(), TZ);
-    if (!isWeekday) {
-      const existing = await db
-        .selectFrom("session")
-        .selectAll()
-        .where("date", "=", date)
-        .executeTakeFirst();
-      return existing ?? null;
-    }
-    return createSessionFor(date);
+    if (isWeekday) await createDefaultFor(date);
+    return db
+      .selectFrom("session")
+      .selectAll()
+      .where("tenant_id", "=", requireTenant())
+      .where("date", "=", date)
+      .orderBy("is_default", "desc")
+      .orderBy("created_at")
+      .orderBy("id")
+      .execute();
   }
 
-  /** Admin override: start today's session regardless of weekday. */
+  /** Admin override: start today's default train regardless of weekday. */
   async function forceStartToday(): Promise<SessionRow> {
     const { date } = todayInfo(now(), TZ);
-    return createSessionFor(date);
+    return createDefaultFor(date);
   }
 
-  /** Today's session or a domain error — for mutations that require one. */
-  async function requireToday(): Promise<SessionRow> {
-    const session = await getOrCreateToday();
+  /** One of today's trains by public id, or a domain error. */
+  async function requireTrainToday(trainId: string): Promise<SessionRow> {
+    const { date } = todayInfo(now(), TZ);
+    const session = await db
+      .selectFrom("session")
+      .selectAll()
+      .where("tenant_id", "=", requireTenant())
+      .where("date", "=", date)
+      .where("public_id", "=", trainId)
+      .executeTakeFirst();
     if (!session) {
-      throw new LunchError("No lunch session today — an admin can start one.");
+      throw new LunchError("That lunch train doesn't exist today.");
     }
     return session;
   }
 
-  async function requireOpenToday(): Promise<SessionRow> {
-    const session = await requireToday();
+  async function requireOpenTrainToday(trainId: string): Promise<SessionRow> {
+    const session = await requireTrainToday(trainId);
     if (session.status !== "open") {
-      throw new LunchError("Today's session is already finalized.");
+      throw new LunchError("This train is already finalized.");
     }
+    return session;
+  }
+
+  /** Trains are managed by their creator and by admins. The default train
+   * has no creator, so it stays admin-managed. */
+  function requireManager(session: SessionRow, actor: Actor) {
+    const isCreator =
+      session.created_by !== null &&
+      session.created_by.toLowerCase() === actor.name.toLowerCase();
+    if (!actor.isAdmin && !isCreator) {
+      throw new LunchError(
+        "Only this train's creator or an admin can manage it.",
+      );
+    }
+  }
+
+  /** Puts `name` on `session`, leaving (vote included) any other train they
+   * were on that day. Transactional: the move spans several statements and
+   * must never leave someone on two trains. */
+  async function moveIntoTrain(session: SessionRow, name: string) {
+    await db.transaction().execute(async (trx) => {
+      const siblings = trx
+        .selectFrom("session")
+        .select("id")
+        .where("tenant_id", "=", session.tenant_id)
+        .where("date", "=", session.date)
+        .where("id", "!=", session.id);
+      await trx
+        .deleteFrom("vote")
+        .where("voter_name", "=", name)
+        .where("session_id", "in", siblings)
+        .execute();
+      await trx
+        .deleteFrom("participant")
+        .where("name", "=", name)
+        .where("session_id", "in", siblings)
+        .execute();
+      await trx
+        .insertInto("participant")
+        .values({ session_id: session.id, name })
+        .onConflict((oc) => oc.columns(["session_id", "name"]).doNothing())
+        .execute();
+    });
+  }
+
+  /** Starts an extra named train for today; the creator hops on it. */
+  async function createTrain(actor: Actor, name: string): Promise<SessionRow> {
+    const tenant = requireTenant();
+    const trimmed = name.trim();
+    if (trimmed.length === 0 || trimmed.length > 40) {
+      throw new LunchError("Give the train a name (max 40 characters).");
+    }
+    const { date, isWeekday } = todayInfo(now(), TZ);
+    if (!isWeekday && !actor.isAdmin) {
+      // Mirrors the default train's weekday rule — but once an admin has
+      // force-started a weekend session, extra trains are fair game.
+      const existing = await db
+        .selectFrom("session")
+        .select("id")
+        .where("tenant_id", "=", tenant)
+        .where("date", "=", date)
+        .limit(1)
+        .executeTakeFirst();
+      if (!existing) {
+        throw new LunchError("No lunch today — an admin can start one.");
+      }
+    }
+    let session: SessionRow;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        session = await db
+          .insertInto("session")
+          .values({
+            tenant_id: tenant,
+            date,
+            name: trimmed,
+            is_default: 0,
+            created_by: actor.name,
+            public_id: generateSlug(deps.rng),
+          })
+          .returningAll()
+          .executeTakeFirstOrThrow();
+        break;
+      } catch (e) {
+        // The named-train index violation is reported as
+        // "UNIQUE constraint failed: session.tenant_id, session.date, session.name".
+        const msg = String(e);
+        if (msg.includes("session.name")) {
+          throw new LunchError("A train with that name already exists today.");
+        }
+        if (attempt >= 2 || !msg.includes("UNIQUE")) throw e;
+      }
+    }
+    await moveIntoTrain(session, actor.name);
     return session;
   }
 
   // Join and leave stay open after finalization: late joiners simply tag along
   // to the decided place, and quitters free up the headcount. Only the
   // decision itself (votes, mode, dictator) is locked.
-  async function join(name: string) {
-    const session = await requireToday();
-    await db
-      .insertInto("participant")
-      .values({ session_id: session.id, name })
-      .onConflict((oc) => oc.columns(["session_id", "name"]).doNothing())
-      .execute();
+  async function join(name: string, trainId: string) {
+    const session = await requireTrainToday(trainId);
+    await moveIntoTrain(session, name);
   }
 
-  async function leave(name: string) {
-    const session = await requireToday();
+  async function leave(name: string, trainId: string) {
+    const session = await requireTrainToday(trainId);
     await db
       .deleteFrom("participant")
       .where("session_id", "=", session.id)
@@ -107,8 +248,8 @@ export function createService(db: Kysely<DB>, deps: ServiceDeps = {}) {
       .execute();
   }
 
-  async function vote(name: string, placeId: number) {
-    const session = await requireOpenToday();
+  async function vote(name: string, trainId: string, placeId: number) {
+    const session = await requireOpenTrainToday(trainId);
     if (session.mode !== "democracy") {
       throw new LunchError("Voting is only available in democracy mode.");
     }
@@ -124,7 +265,8 @@ export function createService(db: Kysely<DB>, deps: ServiceDeps = {}) {
     if (closed) {
       throw new LunchError(`That place isn't available today (${closed}).`);
     }
-    await join(name);
+    // Voting rides the train: it moves you off any other train today.
+    await moveIntoTrain(session, name);
     await db
       .insertInto("vote")
       .values({ session_id: session.id, voter_name: name, place_id: placeId })
@@ -137,8 +279,8 @@ export function createService(db: Kysely<DB>, deps: ServiceDeps = {}) {
       .execute();
   }
 
-  async function unvote(name: string) {
-    const session = await requireOpenToday();
+  async function unvote(name: string, trainId: string) {
+    const session = await requireOpenTrainToday(trainId);
     await db
       .deleteFrom("vote")
       .where("session_id", "=", session.id)
@@ -146,8 +288,9 @@ export function createService(db: Kysely<DB>, deps: ServiceDeps = {}) {
       .execute();
   }
 
-  async function setMode(mode: SessionMode) {
-    const session = await requireOpenToday();
+  async function setMode(actor: Actor, trainId: string, mode: SessionMode) {
+    const session = await requireOpenTrainToday(trainId);
+    requireManager(session, actor);
     // Votes and dictator designation survive a mode change on purpose:
     // it makes switching back reversible; finalize only reads current-mode data.
     await db
@@ -157,8 +300,13 @@ export function createService(db: Kysely<DB>, deps: ServiceDeps = {}) {
       .execute();
   }
 
-  async function setDictator(name: string | null) {
-    const session = await requireOpenToday();
+  async function setDictator(
+    actor: Actor,
+    trainId: string,
+    name: string | null,
+  ) {
+    const session = await requireOpenTrainToday(trainId);
+    requireManager(session, actor);
     if (session.mode !== "dictatorship") {
       throw new LunchError("Set the mode to dictatorship first.");
     }
@@ -219,10 +367,11 @@ export function createService(db: Kysely<DB>, deps: ServiceDeps = {}) {
     return rows.filter((r) => !closed.has(r.place_id));
   }
 
-  async function finalize() {
+  async function finalize(actor: Actor, trainId: string) {
     // Single-process synchronous driver: no interleaving between the read
     // and the guarded update below, and the update re-checks status anyway.
-    const session = await requireToday();
+    const session = await requireTrainToday(trainId);
+    requireManager(session, actor);
     const decision = decideFinalize(
       {
         status: session.status,
@@ -247,8 +396,12 @@ export function createService(db: Kysely<DB>, deps: ServiceDeps = {}) {
       .execute();
   }
 
-  async function dictatorPick(callerName: string, placeId: number) {
-    const session = await requireOpenToday();
+  async function dictatorPick(
+    callerName: string,
+    trainId: string,
+    placeId: number,
+  ) {
+    const session = await requireOpenTrainToday(trainId);
     if (session.mode !== "dictatorship") {
       throw new LunchError("The session is not in dictatorship mode.");
     }
@@ -256,7 +409,7 @@ export function createService(db: Kysely<DB>, deps: ServiceDeps = {}) {
       !session.dictator_name ||
       session.dictator_name.toLowerCase() !== callerName.toLowerCase()
     ) {
-      throw new LunchError("Only today's dictator can pick.");
+      throw new LunchError("Only this train's dictator can pick.");
     }
     const place = await db
       .selectFrom("place")
@@ -282,10 +435,11 @@ export function createService(db: Kysely<DB>, deps: ServiceDeps = {}) {
       .execute();
   }
 
-  async function reopen() {
-    const session = await requireToday();
+  async function reopen(actor: Actor, trainId: string) {
+    const session = await requireTrainToday(trainId);
+    requireManager(session, actor);
     if (session.status !== "finalized") {
-      throw new LunchError("Today's session is not finalized.");
+      throw new LunchError("This train is not finalized.");
     }
     // Votes, participants, and dictator survive so re-finalizing re-tallies.
     await db
@@ -341,30 +495,42 @@ export function createService(db: Kysely<DB>, deps: ServiceDeps = {}) {
   }
 
   async function snapshot(userName: string) {
-    const session = await getOrCreateToday();
+    const sessions = await todayTrains();
     const places = await listPlacesWithClosed();
-    if (!session) {
-      return {
-        session: null,
-        participants: [],
-        votes: [],
-        myVote: null,
-        places,
-      };
+    const trains = [];
+    let myTrain: string | null = null;
+    let myVote: number | null = null;
+    for (const session of sessions) {
+      const { participants, voteRows, votes } = await sessionState(session.id);
+      trains.push({ session, participants, votes });
+      const riding = participants.some(
+        (p) => p.name.toLowerCase() === userName.toLowerCase(),
+      );
+      if (riding) {
+        // One train per person per day, so at most one of these matches.
+        myTrain = session.public_id;
+        myVote =
+          voteRows.find(
+            (v) => v.voter_name.toLowerCase() === userName.toLowerCase(),
+          )?.place_id ?? null;
+      }
     }
-    const { participants, voteRows, votes } = await sessionState(session.id);
-    const myVote =
-      voteRows.find(
-        (v) => v.voter_name.toLowerCase() === userName.toLowerCase(),
-      )?.place_id ?? null;
-    return { session, participants, votes, myVote, places };
+    return {
+      date: todayInfo(now(), TZ).date,
+      trains,
+      myTrain,
+      myVote,
+      places,
+    };
   }
 
-  /** Read-only view of any session by its public slug — null if it doesn't exist. */
+  /** Read-only view of any of the tenant's sessions by its public slug —
+   * null if it doesn't exist (or belongs to another tenant). */
   async function sessionDetail(publicId: string) {
     const session = await db
       .selectFrom("session")
       .selectAll()
+      .where("tenant_id", "=", requireTenant())
       .where("public_id", "=", publicId)
       .executeTakeFirst();
     if (!session) return null;
@@ -602,9 +768,11 @@ export function createService(db: Kysely<DB>, deps: ServiceDeps = {}) {
       .where("slug", "=", slug)
       .executeTakeFirst();
     if (!place) return null;
+    // Deliberately unscoped: the catalog is shared, so a place's track
+    // record aggregates every tenant's trains.
     const chosenIn = await db
       .selectFrom("session")
-      .select(["public_id", "date", "mode"])
+      .select(["public_id", "date", "name", "mode"])
       .where("chosen_place_id", "=", place.id)
       .where("status", "=", "finalized")
       .orderBy("date", "desc")
@@ -844,16 +1012,19 @@ export function createService(db: Kysely<DB>, deps: ServiceDeps = {}) {
       .execute();
   }
 
-  /** Admin: permanently removes a session. Participants and votes cascade
-   * (FK ON DELETE CASCADE; migrate.ts turns the pragma on). Deleting today's
-   * session resets it — the next visit lazily recreates it empty. */
-  async function deleteSession(publicId: string) {
+  /** Permanently removes a session; creator-or-admin. Participants and votes
+   * cascade (FK ON DELETE CASCADE; migrate.ts turns the pragma on). Deleting
+   * today's default train resets it — the next visit lazily recreates it
+   * empty; a deleted named train is gone for good. */
+  async function deleteSession(actor: Actor, publicId: string) {
     const session = await db
       .selectFrom("session")
-      .select("id")
+      .selectAll()
+      .where("tenant_id", "=", requireTenant())
       .where("public_id", "=", publicId)
       .executeTakeFirst();
     if (!session) throw new LunchError("That session doesn't exist.");
+    requireManager(session, actor);
     await db.deleteFrom("session").where("id", "=", session.id).execute();
   }
 
@@ -864,18 +1035,24 @@ export function createService(db: Kysely<DB>, deps: ServiceDeps = {}) {
       .select([
         "session.public_id",
         "session.date",
+        "session.name",
+        "session.created_by",
         "session.mode",
         "session.status",
         "place.name as place_name",
       ])
+      .where("session.tenant_id", "=", requireTenant())
       .orderBy("session.date", "desc")
+      .orderBy("session.is_default", "desc")
+      .orderBy("session.created_at")
       .limit(limit)
       .execute();
   }
 
   return {
-    getOrCreateToday,
+    todayTrains,
     forceStartToday,
+    createTrain,
     join,
     leave,
     vote,

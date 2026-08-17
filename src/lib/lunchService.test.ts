@@ -3,18 +3,39 @@ import { Kysely, SqliteDialect } from "kysely";
 import { beforeEach, describe, expect, it } from "vitest";
 import { migrate } from "@/db/migrate";
 import type { DB } from "@/db/types";
-import { createService, LunchError, type Service } from "./lunchService";
+import {
+  createService,
+  LunchError,
+  type Actor,
+  type Service,
+  type SessionRow,
+} from "./lunchService";
 
 // A weekday (Friday) / weekend in the service's hardcoded Helsinki timezone
 const FRIDAY = new Date("2026-08-14T09:00:00Z");
 const SATURDAY = new Date("2026-08-15T09:00:00Z");
 
+const ADMIN: Actor = { name: "TestAdmin", isAdmin: true };
+
 let db: Kysely<DB>;
 let service: Service;
 let rngValue: number;
 
-function makeService(now: Date): Service {
-  return createService(db, { now: () => now, rng: () => rngValue });
+// The migration seeds tenant 1 ('Default'); isolation tests add tenant 2.
+// The rng is deterministic but advancing: the first call after a test sets
+// rngValue returns it exactly (tie-breaks stay pinnable), and subsequent
+// calls walk an LCG so successive slugs differ — multiple trains per day
+// need distinct public_ids.
+function makeService(now: Date, tenantId = 1): Service {
+  return createService(db, {
+    tenantId,
+    now: () => now,
+    rng: () => {
+      const v = rngValue;
+      rngValue = ((v * 9301 + 49297) % 233280) / 233280;
+      return v;
+    },
+  });
 }
 
 beforeEach(() => {
@@ -33,10 +54,54 @@ async function addPlaces(...names: string[]): Promise<number[]> {
   return names.map((n) => rows.find((r) => r.name === n)!.id);
 }
 
+// Most suites exercise a single (default) train, as the app did before
+// multi-train — these wrappers supply the train id and an admin actor.
+async function defaultTrain(
+  svc: Service = service,
+): Promise<SessionRow | null> {
+  const trains = await svc.todayTrains();
+  return trains.find((t) => t.is_default === 1) ?? null;
+}
+async function tid(svc: Service = service): Promise<string> {
+  return (await defaultTrain(svc))!.public_id;
+}
+const join = async (name: string, svc = service) =>
+  svc.join(name, await tid(svc));
+const leave = async (name: string, svc = service) =>
+  svc.leave(name, await tid(svc));
+const vote = async (name: string, placeId: number, svc = service) =>
+  svc.vote(name, await tid(svc), placeId);
+const unvote = async (name: string, svc = service) =>
+  svc.unvote(name, await tid(svc));
+const setMode = async (
+  mode: "democracy" | "dictatorship" | "random",
+  svc = service,
+) => svc.setMode(ADMIN, await tid(svc), mode);
+const setDictator = async (name: string | null, svc = service) =>
+  svc.setDictator(ADMIN, await tid(svc), name);
+const finalize = async (svc = service) => svc.finalize(ADMIN, await tid(svc));
+const reopen = async (svc = service) => svc.reopen(ADMIN, await tid(svc));
+const dictatorPick = async (caller: string, placeId: number, svc = service) =>
+  svc.dictatorPick(caller, await tid(svc), placeId);
+
+/** The old single-session snapshot shape, read off the default train. */
+async function snapshot(name: string, svc: Service = service) {
+  const snap = await svc.snapshot(name);
+  const t =
+    snap.trains.find((t) => t.session.is_default === 1) ?? snap.trains[0];
+  return {
+    session: t?.session ?? null,
+    participants: t?.participants ?? [],
+    votes: t?.votes ?? [],
+    myVote: snap.myVote,
+    places: snap.places,
+  };
+}
+
 describe("session auto-creation", () => {
   it("lazily creates today's session once", async () => {
-    const a = await service.getOrCreateToday();
-    const b = await service.getOrCreateToday();
+    const a = await defaultTrain();
+    const b = await defaultTrain();
     expect(a!.id).toBe(b!.id);
     expect(a!.date).toBe("2026-08-14");
     expect(a!.mode).toBe("democracy");
@@ -47,7 +112,7 @@ describe("session auto-creation", () => {
 
   it("returns null on weekends and creates nothing", async () => {
     const weekend = makeService(SATURDAY);
-    expect(await weekend.getOrCreateToday()).toBe(null);
+    expect(await defaultTrain(weekend)).toBe(null);
     expect(await db.selectFrom("session").selectAll().execute()).toHaveLength(
       0,
     );
@@ -58,7 +123,7 @@ describe("session auto-creation", () => {
     const forced = await weekend.forceStartToday();
     expect(forced.date).toBe("2026-08-15");
     expect(forced.status).toBe("open");
-    expect((await weekend.getOrCreateToday())!.id).toBe(forced.id);
+    expect((await defaultTrain(weekend))!.id).toBe(forced.id);
   });
 
   it("force start is idempotent and works after the session exists", async () => {
@@ -75,9 +140,9 @@ describe("session auto-creation", () => {
     const weekend = makeService(SATURDAY);
     await weekend.forceStartToday();
     const [sushi] = await addPlaces("Sushi");
-    await weekend.vote("Ada", sushi!);
-    await weekend.finalize();
-    const s = (await weekend.getOrCreateToday())!;
+    await vote("Ada", sushi!, weekend);
+    await finalize(weekend);
+    const s = (await defaultTrain(weekend))!;
     expect(s.status).toBe("finalized");
     expect(s.chosen_place_id).toBe(sushi);
   });
@@ -86,9 +151,9 @@ describe("session auto-creation", () => {
 describe("voting", () => {
   it("vote auto-joins and is a changeable upsert", async () => {
     const [a, b] = await addPlaces("Sushi", "Pizza");
-    await service.vote("Ada", a!);
-    await service.vote("Ada", b!);
-    const snap = await service.snapshot("Ada");
+    await vote("Ada", a!);
+    await vote("Ada", b!);
+    const snap = await snapshot("Ada");
     expect(snap.participants.map((p) => p.name)).toEqual(["Ada"]);
     expect(snap.votes).toEqual([{ placeId: b, count: 1, voters: ["Ada"] }]);
     expect(snap.myVote).toBe(b);
@@ -97,29 +162,29 @@ describe("voting", () => {
   it("rejects votes for archived places", async () => {
     const [a] = await addPlaces("Sushi");
     await service.setPlaceArchived(a!, true);
-    await expect(service.vote("Ada", a!)).rejects.toThrow(LunchError);
+    await expect(vote("Ada", a!)).rejects.toThrow(LunchError);
   });
 
   it("rejects votes outside democracy mode", async () => {
     const [a] = await addPlaces("Sushi");
-    await service.setMode("random");
-    await expect(service.vote("Ada", a!)).rejects.toThrow(LunchError);
+    await setMode("random");
+    await expect(vote("Ada", a!)).rejects.toThrow(LunchError);
   });
 });
 
 describe("finalize / reopen", () => {
   it("democracy: tallies votes, rejects zero votes", async () => {
     await addPlaces("Sushi");
-    await expect(service.finalize()).rejects.toThrow(/No votes/);
+    await expect(finalize()).rejects.toThrow(/No votes/);
   });
 
   it("democracy: winner takes it, tie broken by rng", async () => {
     const [a, b] = await addPlaces("Sushi", "Pizza");
-    await service.vote("Ada", a!);
-    await service.vote("Bob", b!);
+    await vote("Ada", a!);
+    await vote("Bob", b!);
     rngValue = 0.99; // tie → second leader
-    await service.finalize();
-    const s = (await service.getOrCreateToday())!;
+    await finalize();
+    const s = (await defaultTrain())!;
     expect(s.status).toBe("finalized");
     expect([a, b]).toContain(s.chosen_place_id);
     expect(s.chosen_place_id).toBe(b);
@@ -127,88 +192,88 @@ describe("finalize / reopen", () => {
 
   it("democracy: ignores votes for places archived after voting", async () => {
     const [a, b] = await addPlaces("Sushi", "Pizza");
-    await service.vote("Ada", a!);
-    await service.vote("Bob", a!);
-    await service.vote("Cyd", b!);
+    await vote("Ada", a!);
+    await vote("Bob", a!);
+    await vote("Cyd", b!);
     await service.setPlaceArchived(a!, true);
-    await service.finalize();
-    const s = (await service.getOrCreateToday())!;
+    await finalize();
+    const s = (await defaultTrain())!;
     expect(s.chosen_place_id).toBe(b);
   });
 
   it("random: draws from non-archived places", async () => {
     const [a, b] = await addPlaces("Sushi", "Pizza");
-    await service.setMode("random");
+    await setMode("random");
     await service.setPlaceArchived(a!, true);
-    await service.finalize();
-    const s = (await service.getOrCreateToday())!;
+    await finalize();
+    const s = (await defaultTrain())!;
     expect(s.chosen_place_id).toBe(b);
   });
 
   it("dictatorship: only the dictator picks; pick finalizes atomically", async () => {
     const [a] = await addPlaces("Sushi");
-    await service.setMode("dictatorship");
-    await expect(service.finalize()).rejects.toThrow(/dictator/i);
-    await service.setDictator("Ada");
-    await expect(service.finalize()).rejects.toThrow(/Ada/);
-    await expect(service.dictatorPick("Bob", a!)).rejects.toThrow(LunchError);
-    await service.dictatorPick("ada", a!); // case-insensitive
-    const s = (await service.getOrCreateToday())!;
+    await setMode("dictatorship");
+    await expect(finalize()).rejects.toThrow(/dictator/i);
+    await setDictator("Ada");
+    await expect(finalize()).rejects.toThrow(/Ada/);
+    await expect(dictatorPick("Bob", a!)).rejects.toThrow(LunchError);
+    await dictatorPick("ada", a!); // case-insensitive
+    const s = (await defaultTrain())!;
     expect(s.status).toBe("finalized");
     expect(s.chosen_place_id).toBe(a);
   });
 
   it("reopen keeps votes so re-finalize re-tallies", async () => {
     const [a, b] = await addPlaces("Sushi", "Pizza");
-    await service.vote("Ada", a!);
-    await service.finalize();
-    await service.reopen();
-    const reopened = (await service.getOrCreateToday())!;
+    await vote("Ada", a!);
+    await finalize();
+    await reopen();
+    const reopened = (await defaultTrain())!;
     expect(reopened.status).toBe("open");
     expect(reopened.chosen_place_id).toBe(null);
-    await service.vote("Bob", b!);
-    await service.vote("Cyd", b!);
-    await service.finalize();
-    expect((await service.getOrCreateToday())!.chosen_place_id).toBe(b);
+    await vote("Bob", b!);
+    await vote("Cyd", b!);
+    await finalize();
+    expect((await defaultTrain())!.chosen_place_id).toBe(b);
   });
 
   it("decision mutations are blocked after finalize", async () => {
     const [a] = await addPlaces("Sushi");
-    await service.vote("Ada", a!);
-    await service.finalize();
-    await expect(service.vote("Bob", a!)).rejects.toThrow(/finalized/);
-    await expect(service.setMode("random")).rejects.toThrow(/finalized/);
+    await vote("Ada", a!);
+    await finalize();
+    await expect(vote("Bob", a!)).rejects.toThrow(/finalized/);
+    await expect(setMode("random")).rejects.toThrow(/finalized/);
   });
 
   it("late joiners can join (and leave) after finalize", async () => {
     const [a] = await addPlaces("Sushi");
-    await service.vote("Ada", a!);
-    await service.finalize();
-    await service.join("Bob");
-    let snap = await service.snapshot("Bob");
+    await vote("Ada", a!);
+    await finalize();
+    await join("Bob");
+    let snap = await snapshot("Bob");
     expect(snap.participants.map((p) => p.name)).toEqual(["Ada", "Bob"]);
     expect(snap.session!.status).toBe("finalized");
-    await service.leave("Bob");
-    snap = await service.snapshot("Bob");
+    await leave("Bob");
+    snap = await snapshot("Bob");
     expect(snap.participants.map((p) => p.name)).toEqual(["Ada"]);
   });
 
   it("mode change keeps votes", async () => {
     const [a] = await addPlaces("Sushi");
-    await service.vote("Ada", a!);
-    await service.setMode("random");
-    await service.setMode("democracy");
-    await service.finalize();
-    expect((await service.getOrCreateToday())!.chosen_place_id).toBe(a);
+    await vote("Ada", a!);
+    await setMode("random");
+    await setMode("democracy");
+    await finalize();
+    expect((await defaultTrain())!.chosen_place_id).toBe(a);
   });
 });
 
 describe("sessionDetail", () => {
   it("returns a read-only view of a session by its public slug", async () => {
     const [a] = await addPlaces("Sushi");
-    await service.vote("Ada", a!);
-    await service.finalize();
-    const slug = (await service.getOrCreateToday())!.public_id;
+    await vote("Ada", a!);
+    await finalize();
+    const slug = (await defaultTrain())!.public_id;
     expect(slug).toMatch(/^[a-z]+-[a-z]+-[2-9a-z]{4}$/);
     const detail = (await service.sessionDetail(slug))!;
     expect(detail.session.status).toBe("finalized");
@@ -222,7 +287,7 @@ describe("sessionDetail", () => {
   });
 
   it("is not addressable by the internal integer id", async () => {
-    await service.getOrCreateToday();
+    await defaultTrain();
     expect(await service.sessionDetail("1")).toBe(null);
   });
 });
@@ -230,11 +295,11 @@ describe("sessionDetail", () => {
 describe("deleteSession", () => {
   it("removes the session with its votes and participants", async () => {
     const [a] = await addPlaces("Sushi");
-    await service.vote("Ada", a!);
-    await service.join("Bob");
-    await service.finalize();
-    const slug = (await service.getOrCreateToday())!.public_id;
-    await service.deleteSession(slug);
+    await vote("Ada", a!);
+    await join("Bob");
+    await finalize();
+    const slug = (await defaultTrain())!.public_id;
+    await service.deleteSession(ADMIN, slug);
     expect(await service.sessionDetail(slug)).toBe(null);
     expect(await db.selectFrom("session").selectAll().execute()).toHaveLength(
       0,
@@ -246,30 +311,30 @@ describe("deleteSession", () => {
   });
 
   it("rejects unknown slugs", async () => {
-    await expect(service.deleteSession("no-such-slug")).rejects.toThrow(
+    await expect(service.deleteSession(ADMIN, "no-such-slug")).rejects.toThrow(
       LunchError,
     );
   });
 
   it("deleting today's session resets it — the next visit starts fresh", async () => {
     const [a] = await addPlaces("Sushi");
-    await service.vote("Ada", a!);
-    await service.finalize();
-    const old = (await service.getOrCreateToday())!;
+    await vote("Ada", a!);
+    await finalize();
+    const old = (await defaultTrain())!;
     expect(old.status).toBe("finalized");
-    await service.deleteSession(old.public_id);
-    const fresh = (await service.getOrCreateToday())!;
+    await service.deleteSession(ADMIN, old.public_id);
+    const fresh = (await defaultTrain())!;
     expect(fresh.status).toBe("open");
     expect(fresh.chosen_place_id).toBe(null);
-    expect((await service.snapshot("Ada")).participants).toHaveLength(0);
+    expect((await snapshot("Ada")).participants).toHaveLength(0);
   });
 
   it("frees the chosen place for deletion once its only session is gone", async () => {
     const [a] = await addPlaces("Sushi");
-    await service.vote("Ada", a!);
-    await service.finalize();
+    await vote("Ada", a!);
+    await finalize();
     await expect(service.deletePlace(a!)).rejects.toThrow(/archive/);
-    await service.deleteSession((await service.getOrCreateToday())!.public_id);
+    await service.deleteSession(ADMIN, (await defaultTrain())!.public_id);
     await service.deletePlace(a!);
     expect(await db.selectFrom("place").selectAll().execute()).toHaveLength(0);
   });
@@ -406,9 +471,9 @@ describe("menu", () => {
 describe("placeDetail", () => {
   it("returns the place with its track record", async () => {
     const [a] = await addPlaces("Sushi Palace");
-    await service.vote("Ada", a!);
-    await service.vote("Bob", a!);
-    await service.finalize();
+    await vote("Ada", a!);
+    await vote("Bob", a!);
+    await finalize();
     const detail = (await service.placeDetail("sushi-palace"))!;
     expect(detail.place.name).toBe("Sushi Palace");
     expect(detail.totalVotes).toBe(2);
@@ -554,7 +619,7 @@ describe("places", () => {
 
   it("deletes a place along with its votes", async () => {
     const [a, b] = await addPlaces("Sushi", "Pizza");
-    await service.vote("Ada", a!);
+    await vote("Ada", a!);
     await service.deletePlace(a!);
     expect(await db.selectFrom("place").select("id").execute()).toEqual([
       { id: b },
@@ -564,8 +629,8 @@ describe("places", () => {
 
   it("refuses to delete a place that is a past session's outcome", async () => {
     const [a] = await addPlaces("Sushi");
-    await service.vote("Ada", a!);
-    await service.finalize();
+    await vote("Ada", a!);
+    await finalize();
     await expect(service.deletePlace(a!)).rejects.toThrow(/archive/);
   });
 });
@@ -573,8 +638,8 @@ describe("places", () => {
 describe("ratings", () => {
   /** Ada eats at the place: votes for it and the session finalizes on it. */
   async function visit(placeId: number, name = "Ada") {
-    await service.vote(name, placeId);
-    await service.finalize();
+    await vote(name, placeId);
+    await finalize();
   }
 
   it("only participants of a finalized session that chose the place can rate", async () => {
@@ -594,15 +659,15 @@ describe("ratings", () => {
   it("late joiners of a finalized session ate there too and can rate", async () => {
     const [a] = await addPlaces("Sushi");
     await visit(a!);
-    await service.join("Bob");
+    await join("Bob");
     await service.ratePlace({ placeId: a!, rating: 4, raterName: "Bob" });
   });
 
   it("appends changes newest-first, skips unchanged, averages current ratings", async () => {
     const [a] = await addPlaces("Sushi");
-    await service.vote("Ada", a!);
-    await service.vote("Bob", a!);
-    await service.finalize();
+    await vote("Ada", a!);
+    await vote("Bob", a!);
+    await finalize();
     await service.ratePlace({ placeId: a!, rating: 5, raterName: "Ada" });
     await service.ratePlace({ placeId: a!, rating: 5, raterName: "Ada" }); // unchanged → no new row
     await service.ratePlace({ placeId: a!, rating: 3, raterName: "Ada" });
@@ -633,11 +698,11 @@ describe("ratings", () => {
   it("reopening the session suspends eligibility until re-finalized", async () => {
     const [a] = await addPlaces("Sushi");
     await visit(a!);
-    await service.reopen();
+    await reopen();
     await expect(
       service.ratePlace({ placeId: a!, rating: 5, raterName: "Ada" }),
     ).rejects.toThrow(LunchError);
-    await service.finalize();
+    await finalize();
     await service.ratePlace({ placeId: a!, rating: 5, raterName: "Ada" });
   });
 
@@ -653,9 +718,9 @@ describe("ratings", () => {
 
   it("accepts half-star ratings and averages them", async () => {
     const [a] = await addPlaces("Sushi");
-    await service.vote("Ada", a!);
-    await service.vote("Bob", a!);
-    await service.finalize();
+    await vote("Ada", a!);
+    await vote("Bob", a!);
+    await finalize();
     await service.ratePlace({ placeId: a!, rating: 2.5, raterName: "Ada" });
     await service.ratePlace({ placeId: a!, rating: 0.5, raterName: "Bob" });
     const { ratings } = (await service.placeDetail("sushi"))!;
@@ -665,9 +730,9 @@ describe("ratings", () => {
 
   it("deleting a rating removes that rater's history only, case-insensitively", async () => {
     const [a] = await addPlaces("Sushi");
-    await service.vote("Ada", a!);
-    await service.vote("Bob", a!);
-    await service.finalize();
+    await vote("Ada", a!);
+    await vote("Bob", a!);
+    await finalize();
     await service.ratePlace({ placeId: a!, rating: 5, raterName: "Ada" });
     await service.ratePlace({ placeId: a!, rating: 3, raterName: "Ada" });
     await service.ratePlace({ placeId: a!, rating: 4, raterName: "Bob" });
@@ -731,13 +796,13 @@ describe("opening hours and closures", () => {
   it("rejects votes for a place whose hours skip today", async () => {
     const [a] = await addPlaces("Sushi");
     await service.setPlaceHours(a!, mondayOnly);
-    await expect(service.vote("Ada", a!)).rejects.toThrow(/closed on Fridays/);
+    await expect(vote("Ada", a!)).rejects.toThrow(/closed on Fridays/);
   });
 
   it("a place with no hours configured stays votable", async () => {
     const [a] = await addPlaces("Sushi");
-    await service.vote("Ada", a!);
-    const snap = await service.snapshot("Ada");
+    await vote("Ada", a!);
+    const snap = await snapshot("Ada");
     expect(snap.places[0]!.closedReason).toBe(null);
   });
 
@@ -750,10 +815,10 @@ describe("opening hours and closures", () => {
       reason: "renovation",
       createdBy: "Ada",
     });
-    await expect(service.vote("Ada", a!)).rejects.toThrow(/renovation/);
-    await service.setMode("dictatorship");
-    await service.setDictator("Ada");
-    await expect(service.dictatorPick("Ada", a!)).rejects.toThrow(/renovation/);
+    await expect(vote("Ada", a!)).rejects.toThrow(/renovation/);
+    await setMode("dictatorship");
+    await setDictator("Ada");
+    await expect(dictatorPick("Ada", a!)).rejects.toThrow(/renovation/);
   });
 
   it("closures next to today's date don't block", async () => {
@@ -772,14 +837,14 @@ describe("opening hours and closures", () => {
       reason: "vacation",
       createdBy: "Ada",
     });
-    await service.vote("Ada", a!);
+    await vote("Ada", a!);
   });
 
   it("democracy: votes for a place closed after voting drop from the tally", async () => {
     const [a, b] = await addPlaces("Sushi", "Pizza");
-    await service.vote("Ada", a!);
-    await service.vote("Bob", a!);
-    await service.vote("Cyd", b!);
+    await vote("Ada", a!);
+    await vote("Bob", a!);
+    await vote("Cyd", b!);
     await service.addClosure({
       placeId: a!,
       startDate: "2026-08-14",
@@ -787,22 +852,22 @@ describe("opening hours and closures", () => {
       reason: "holiday",
       createdBy: "Ada",
     });
-    await service.finalize();
-    expect((await service.getOrCreateToday())!.chosen_place_id).toBe(b);
+    await finalize();
+    expect((await defaultTrain())!.chosen_place_id).toBe(b);
   });
 
   it("random: draws only from places open today", async () => {
     const [a, b] = await addPlaces("Sushi", "Pizza");
-    await service.setMode("random");
+    await setMode("random");
     await service.setPlaceHours(a!, mondayOnly);
-    await service.finalize();
-    expect((await service.getOrCreateToday())!.chosen_place_id).toBe(b);
+    await finalize();
+    expect((await defaultTrain())!.chosen_place_id).toBe(b);
   });
 
   it("snapshot exposes closedReason per place", async () => {
     const [a, b] = await addPlaces("Sushi", "Pizza");
     await service.setPlaceHours(a!, mondayOnly);
-    const snap = await service.snapshot("Ada");
+    const snap = await snapshot("Ada");
     const byId = new Map(snap.places.map((p) => [p.id, p.closedReason]));
     expect(byId.get(a!)).toBe("closed on Fridays");
     expect(byId.get(b!)).toBe(null);
@@ -812,11 +877,11 @@ describe("opening hours and closures", () => {
     const [a] = await addPlaces("Sushi");
     await service.setPlaceHours(a!, mondayOnly);
     await service.setPlaceHours(a!, allWeek);
-    await service.vote("Ada", a!);
+    await vote("Ada", a!);
     await service.setPlaceHours(a!, []);
     const { hours } = (await service.placeDetail("sushi"))!;
     expect(hours).toEqual([]);
-    await service.vote("Bob", a!);
+    await vote("Bob", a!);
   });
 
   it("placeDetail returns hours, closures, and closedReason", async () => {
@@ -860,17 +925,17 @@ describe("opening hours and closures", () => {
     });
     const closureId = (await service.placeDetail("sushi"))!.closures[0]!.id;
     await service.deleteClosure(closureId);
-    await service.vote("Ada", a!);
+    await vote("Ada", a!);
   });
 
   it("reopen then closing the winner re-tallies to the runner-up", async () => {
     const [a, b] = await addPlaces("Sushi", "Pizza");
-    await service.vote("Ada", a!);
-    await service.vote("Bob", b!);
-    await service.vote("Cyd", a!);
-    await service.finalize();
-    expect((await service.getOrCreateToday())!.chosen_place_id).toBe(a);
-    await service.reopen();
+    await vote("Ada", a!);
+    await vote("Bob", b!);
+    await vote("Cyd", a!);
+    await finalize();
+    expect((await defaultTrain())!.chosen_place_id).toBe(a);
+    await reopen();
     await service.addClosure({
       placeId: a!,
       startDate: "2026-08-14",
@@ -878,8 +943,8 @@ describe("opening hours and closures", () => {
       reason: "sudden renovation",
       createdBy: "Ada",
     });
-    await service.finalize();
-    expect((await service.getOrCreateToday())!.chosen_place_id).toBe(b);
+    await finalize();
+    expect((await defaultTrain())!.chosen_place_id).toBe(b);
   });
 
   it("a place serving lunch on other days but not today is excluded", async () => {
@@ -895,9 +960,7 @@ describe("opening hours and closures", () => {
       },
       { weekday: 5, open: "09:00", close: "21:00" },
     ]);
-    await expect(service.vote("Ada", a!)).rejects.toThrow(
-      /no lunch on Fridays/,
-    );
+    await expect(vote("Ada", a!)).rejects.toThrow(/no lunch on Fridays/);
     // Add Friday's lunch window and the place is votable again.
     await service.setPlaceHours(a!, [
       {
@@ -908,7 +971,7 @@ describe("opening hours and closures", () => {
         lunchClose: "14:00",
       },
     ]);
-    await service.vote("Ada", a!);
+    await vote("Ada", a!);
   });
 
   it("lunch may fall outside the non-lunch opening hours", async () => {
@@ -923,7 +986,7 @@ describe("opening hours and closures", () => {
         lunchClose: "14:00",
       },
     ]);
-    await service.vote("Ada", a!);
+    await vote("Ada", a!);
   });
 
   it("accepts hours closing past midnight", async () => {
@@ -991,5 +1054,257 @@ describe("opening hours and closures", () => {
     expect(
       await db.selectFrom("place_closure").selectAll().execute(),
     ).toHaveLength(0);
+  });
+});
+
+describe("multiple trains per day", () => {
+  const ADA: Actor = { name: "Ada", isAdmin: false };
+  const BOB: Actor = { name: "Bob", isAdmin: false };
+
+  it("todayTrains lazily creates exactly one default train", async () => {
+    await service.todayTrains();
+    const trains = await service.todayTrains();
+    expect(trains).toHaveLength(1);
+    expect(trains[0]!.is_default).toBe(1);
+    expect(trains[0]!.name).toBe(null);
+    expect(trains[0]!.created_by).toBe(null);
+  });
+
+  it("createTrain adds a named train, auto-joins the creator, orders default first", async () => {
+    const t = await service.createTrain(ADA, "12:00 crew");
+    expect(t.name).toBe("12:00 crew");
+    expect(t.is_default).toBe(0);
+    expect(t.created_by).toBe("Ada");
+    const trains = await service.todayTrains();
+    expect(trains.map((s) => s.name)).toEqual([null, "12:00 crew"]);
+    const snap = await service.snapshot("Ada");
+    expect(snap.myTrain).toBe(t.public_id);
+    expect(
+      snap.trains
+        .find((x) => x.session.public_id === t.public_id)!
+        .participants.map((p) => p.name),
+    ).toEqual(["Ada"]);
+  });
+
+  it("rejects duplicate train names case-insensitively, same day and tenant only", async () => {
+    await service.createTrain(ADA, "12:00 Crew");
+    await expect(service.createTrain(BOB, "12:00 crew")).rejects.toThrow(
+      /already exists/,
+    );
+    // Another tenant may reuse the name the same day.
+    await db.insertInto("tenant").values({ id: 2, name: "Other" }).execute();
+    const other = makeService(FRIDAY, 2);
+    await other.createTrain(ADA, "12:00 crew");
+  });
+
+  it("rejects blank names", async () => {
+    await expect(service.createTrain(ADA, "   ")).rejects.toThrow(LunchError);
+  });
+
+  it("weekend: members can't start trains until an admin force-starts", async () => {
+    const weekend = makeService(SATURDAY);
+    await expect(weekend.createTrain(ADA, "Brunch")).rejects.toThrow(
+      /admin can start/,
+    );
+    await weekend.createTrain(ADMIN, "Brunch gang");
+    await weekend.createTrain(ADA, "Second wave"); // a train exists now
+  });
+
+  it("joining another train moves the rider and their vote", async () => {
+    const [sushi, pizza] = await addPlaces("Sushi", "Pizza");
+    await vote("Ada", sushi!);
+    await vote("Cyd", sushi!);
+    const named = await service.createTrain(BOB, "Late crew");
+    await service.vote("Ada", named.public_id, pizza!);
+    const snap = await service.snapshot("Ada");
+    expect(snap.myTrain).toBe(named.public_id);
+    expect(snap.myVote).toBe(pizza);
+    const dflt = snap.trains.find((t) => t.session.is_default === 1)!;
+    expect(dflt.participants.map((p) => p.name)).toEqual(["Cyd"]);
+    expect(dflt.votes).toEqual([{ placeId: sushi, count: 1, voters: ["Cyd"] }]);
+    // Moving back works too, and empties the vote from the named train.
+    await join("Ada");
+    const back = await service.snapshot("Ada");
+    expect(back.myTrain).toBe((await defaultTrain())!.public_id);
+    expect(back.myVote).toBe(null);
+    const namedAfter = back.trains.find(
+      (t) => t.session.public_id === named.public_id,
+    )!;
+    expect(namedAfter.participants.map((p) => p.name)).toEqual(["Bob"]);
+    expect(namedAfter.votes).toEqual([]);
+  });
+
+  it("myTrain/myVote are null when riding nothing", async () => {
+    const [sushi] = await addPlaces("Sushi");
+    await vote("Ada", sushi!);
+    await leave("Ada");
+    const snap = await service.snapshot("Ada");
+    expect(snap.myTrain).toBe(null);
+    expect(snap.myVote).toBe(null);
+  });
+
+  it("trains finalize and reopen independently", async () => {
+    const [sushi, pizza] = await addPlaces("Sushi", "Pizza");
+    await vote("Ada", sushi!);
+    const named = await service.createTrain(BOB, "Late crew");
+    await service.vote("Bob", named.public_id, pizza!);
+    await service.finalize(BOB, named.public_id);
+    let trains = await service.todayTrains();
+    expect(trains.find((t) => t.is_default === 1)!.status).toBe("open");
+    expect(trains.find((t) => t.name === "Late crew")!.status).toBe(
+      "finalized",
+    );
+    await finalize();
+    await service.reopen(BOB, named.public_id);
+    trains = await service.todayTrains();
+    expect(trains.find((t) => t.is_default === 1)!.status).toBe("finalized");
+    expect(trains.find((t) => t.name === "Late crew")!.status).toBe("open");
+  });
+
+  it("deleting the default train resets it; a named train stays gone", async () => {
+    const named = await service.createTrain(BOB, "Late crew");
+    await service.deleteSession(ADMIN, (await defaultTrain())!.public_id);
+    await service.deleteSession(BOB, named.public_id);
+    const trains = await service.todayTrains();
+    expect(trains).toHaveLength(1);
+    expect(trains[0]!.is_default).toBe(1);
+  });
+
+  it("canRate follows actual participation, not other trains", async () => {
+    const [sushi, pizza] = await addPlaces("Sushi", "Pizza");
+    await vote("Ada", sushi!);
+    const named = await service.createTrain(BOB, "Late crew");
+    await service.vote("Bob", named.public_id, pizza!);
+    await finalize();
+    await service.finalize(BOB, named.public_id);
+    expect(await service.canRate(sushi!, "Ada")).toBe(true);
+    expect(await service.canRate(pizza!, "Ada")).toBe(false);
+    expect(await service.canRate(pizza!, "Bob")).toBe(true);
+    expect(await service.canRate(sushi!, "Bob")).toBe(false);
+  });
+
+  it("history lists every train of a day with names, default first", async () => {
+    const [sushi] = await addPlaces("Sushi");
+    await vote("Ada", sushi!);
+    await service.createTrain(BOB, "Late crew");
+    const rows = await service.history();
+    expect(rows.map((r) => r.name)).toEqual([null, "Late crew"]);
+    expect(rows.map((r) => r.created_by)).toEqual([null, "Bob"]);
+  });
+});
+
+describe("train management authorization", () => {
+  const ADA: Actor = { name: "Ada", isAdmin: false };
+  const BOB: Actor = { name: "Bob", isAdmin: false };
+
+  it("creator manages their named train; other members don't; admins do", async () => {
+    await addPlaces("Sushi"); // random mode needs something to draw from
+    const named = await service.createTrain(ADA, "Ada's crew");
+    const id = named.public_id;
+    await expect(service.setMode(BOB, id, "random")).rejects.toThrow(
+      /creator or an admin/,
+    );
+    await service.setMode(ADA, id, "random");
+    await service.finalize(ADA, id);
+    await expect(service.reopen(BOB, id)).rejects.toThrow(
+      /creator or an admin/,
+    );
+    await service.reopen(ADMIN, id);
+    // Creator identity is case-insensitive.
+    await service.finalize({ name: "ada", isAdmin: false }, id);
+  });
+
+  it("the default train stays admin-only", async () => {
+    const id = (await defaultTrain())!.public_id;
+    await expect(service.setMode(ADA, id, "random")).rejects.toThrow(
+      /creator or an admin/,
+    );
+    await service.setMode(ADMIN, id, "random");
+  });
+
+  it("dictatorPick stays dictator-gated, not manager-gated", async () => {
+    const [sushi] = await addPlaces("Sushi");
+    const named = await service.createTrain(ADA, "Ada's crew");
+    await service.setMode(ADA, named.public_id, "dictatorship");
+    await service.setDictator(ADA, named.public_id, "Bob");
+    // Ada created the train but isn't the dictator.
+    await expect(
+      service.dictatorPick("Ada", named.public_id, sushi!),
+    ).rejects.toThrow(/dictator/);
+    await service.dictatorPick("Bob", named.public_id, sushi!);
+  });
+
+  it("deleteSession allows the creator and rejects unrelated members", async () => {
+    const named = await service.createTrain(ADA, "Ada's crew");
+    await expect(service.deleteSession(BOB, named.public_id)).rejects.toThrow(
+      /creator or an admin/,
+    );
+    await service.deleteSession(ADA, named.public_id);
+    expect(await service.sessionDetail(named.public_id)).toBe(null);
+  });
+});
+
+describe("tenant isolation", () => {
+  let other: Service;
+
+  beforeEach(async () => {
+    await db.insertInto("tenant").values({ id: 2, name: "Other" }).execute();
+    other = makeService(FRIDAY, 2);
+  });
+
+  it("tenants get independent same-day sessions and votes", async () => {
+    const [sushi, pizza] = await addPlaces("Sushi", "Pizza");
+    await vote("Ada", sushi!);
+    await vote("Ada", pizza!, other); // same name, other tenant
+    await finalize(other);
+    expect((await defaultTrain())!.status).toBe("open");
+    expect((await defaultTrain(other))!.status).toBe("finalized");
+    expect((await defaultTrain(other))!.chosen_place_id).toBe(pizza);
+    const snap = await snapshot("Ada");
+    expect(snap.votes).toEqual([{ placeId: sushi, count: 1, voters: ["Ada"] }]);
+  });
+
+  it("todayTrains never leaks another tenant's trains", async () => {
+    await service.createTrain({ name: "Ada", isAdmin: false }, "Crew");
+    const trains = await other.todayTrains();
+    expect(trains).toHaveLength(1);
+    expect(trains[0]!.tenant_id).toBe(2);
+  });
+
+  it("cross-tenant lookups by public id fail", async () => {
+    const mine = (await defaultTrain())!;
+    expect(await other.sessionDetail(mine.public_id)).toBe(null);
+    await expect(other.deleteSession(ADMIN, mine.public_id)).rejects.toThrow(
+      LunchError,
+    );
+    await expect(other.join("Ada", mine.public_id)).rejects.toThrow(
+      /doesn't exist today/,
+    );
+  });
+
+  it("history is tenant-scoped", async () => {
+    await defaultTrain();
+    await defaultTrain(other);
+    expect(await service.history()).toHaveLength(1);
+    expect(await other.history()).toHaveLength(1);
+  });
+
+  it("a tenantless service throws on session methods but serves places", async () => {
+    const tenantless = createService(db, { now: () => FRIDAY });
+    await expect(tenantless.todayTrains()).rejects.toThrow(/No tenant/);
+    await expect(tenantless.history()).rejects.toThrow(/No tenant/);
+    await addPlaces("Sushi");
+    expect(await tenantless.placeDetail("sushi")).not.toBe(null);
+  });
+
+  it("placeDetail aggregates the shared catalog across tenants", async () => {
+    const [sushi] = await addPlaces("Sushi");
+    await vote("Ada", sushi!);
+    await finalize();
+    await vote("Bob", sushi!, other);
+    await finalize(other);
+    const detail = (await service.placeDetail("sushi"))!;
+    expect(detail.chosenIn).toHaveLength(2);
+    expect(detail.totalVotes).toBe(2);
   });
 });

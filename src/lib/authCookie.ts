@@ -1,10 +1,12 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 
-export type Role = "member" | "admin";
+export type Role = "member" | "admin" | "superadmin";
 
 export interface AuthUser {
   name: string;
   role: Role;
+  /** Present iff role is member/admin; superadmin belongs to no tenant. */
+  tenantId?: number;
 }
 
 function hmac(payload: string, secret: string): string {
@@ -27,14 +29,15 @@ export function verify(value: string, secret: string): AuthUser | null {
   }
   try {
     const user = JSON.parse(Buffer.from(payload, "base64url").toString());
-    if (
-      typeof user.name !== "string" ||
-      user.name.length === 0 ||
-      (user.role !== "member" && user.role !== "admin")
-    ) {
-      return null;
+    if (typeof user.name !== "string" || user.name.length === 0) return null;
+    if (user.role === "superadmin") {
+      // A superadmin belongs to no tenant; never trust one from the payload.
+      return { name: user.name, role: "superadmin" };
     }
-    return { name: user.name, role: user.role };
+    if (user.role !== "member" && user.role !== "admin") return null;
+    // Pre-tenancy cookies lack tenantId and are rejected — one-time re-login.
+    if (!Number.isInteger(user.tenantId) || user.tenantId <= 0) return null;
+    return { name: user.name, role: user.role, tenantId: user.tenantId };
   } catch {
     return null;
   }

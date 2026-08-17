@@ -1,0 +1,157 @@
+---
+import Layout from "@/layouts/Layout.astro";
+import { actions } from "astro:actions";
+import { tenantService } from "@/lib/service";
+
+// Middleware already routes non-superadmins away; typed backstop.
+if (Astro.locals.user.role !== "superadmin") {
+  return Astro.redirect("/");
+}
+
+const error =
+  Astro.getActionResult(actions.tenants.create)?.error?.message ??
+  Astro.getActionResult(actions.tenants.rename)?.error?.message ??
+  Astro.getActionResult(actions.tenants.setPasscodes)?.error?.message ??
+  Astro.getActionResult(actions.tenants.delete)?.error?.message;
+
+const tenants = await tenantService.listTenants();
+---
+
+<Layout title="Tenants — Lunch">
+  <div class="flex flex-col gap-4">
+    <h1 class="text-2xl font-bold">Tenants</h1>
+    {error && <div class="alert alert-error text-sm">{error}</div>}
+
+    <div class="card bg-base-100 shadow-sm">
+      <div class="card-body">
+        <h2 class="text-sm font-semibold uppercase opacity-60">New tenant</h2>
+        <form
+          method="POST"
+          action={actions.tenants.create}
+          class="flex flex-wrap items-end gap-2"
+        >
+          <label class="form-control">
+            <span class="label-text mb-1">Name</span>
+            <input
+              type="text"
+              name="name"
+              class="input input-bordered input-sm"
+              required
+              maxlength="60"
+            />
+          </label>
+          <label class="form-control">
+            <span class="label-text mb-1">Member passcode</span>
+            <input
+              type="text"
+              name="sitePasscode"
+              class="input input-bordered input-sm"
+              maxlength="100"
+              autocomplete="off"
+            />
+          </label>
+          <label class="form-control">
+            <span class="label-text mb-1">Admin passcode</span>
+            <input
+              type="text"
+              name="adminPasscode"
+              class="input input-bordered input-sm"
+              maxlength="100"
+              autocomplete="off"
+            />
+          </label>
+          <button class="btn btn-primary btn-sm" type="submit">Create</button>
+        </form>
+        <p class="text-base-content/60 text-xs">
+          Users log in with the organization name plus a passcode; the passcode
+          decides member vs admin. A blank passcode means that role can't log in
+          yet.
+        </p>
+      </div>
+    </div>
+
+    {
+      tenants.map((t) => (
+        <div class="card bg-base-100 shadow-sm">
+          <div class="card-body py-4">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <h2 class="text-lg font-semibold">{t.name}</h2>
+              <span class="text-base-content/60 text-sm">
+                {t.session_count} session{t.session_count === 1 ? "" : "s"} ·
+                since {t.created_at.slice(0, 10)}
+              </span>
+            </div>
+            <div class="flex flex-wrap items-end gap-4">
+              <form
+                method="POST"
+                action={actions.tenants.rename}
+                class="flex items-end gap-2"
+              >
+                <input type="hidden" name="id" value={t.id} />
+                <label class="form-control">
+                  <span class="label-text mb-1">Name</span>
+                  <input
+                    type="text"
+                    name="name"
+                    class="input input-bordered input-sm"
+                    value={t.name}
+                    required
+                    maxlength="60"
+                  />
+                </label>
+                <button class="btn btn-ghost btn-sm" type="submit">
+                  Rename
+                </button>
+              </form>
+              <form
+                method="POST"
+                action={actions.tenants.setPasscodes}
+                class="flex items-end gap-2"
+              >
+                <input type="hidden" name="id" value={t.id} />
+                <label class="form-control">
+                  <span class="label-text mb-1">Member passcode</span>
+                  <input
+                    type="text"
+                    name="sitePasscode"
+                    class="input input-bordered input-sm"
+                    value={t.site_passcode ?? ""}
+                    placeholder="not set"
+                    maxlength="100"
+                    autocomplete="off"
+                  />
+                </label>
+                <label class="form-control">
+                  <span class="label-text mb-1">Admin passcode</span>
+                  <input
+                    type="text"
+                    name="adminPasscode"
+                    class="input input-bordered input-sm"
+                    value={t.admin_passcode ?? ""}
+                    placeholder="not set"
+                    maxlength="100"
+                    autocomplete="off"
+                  />
+                </label>
+                <button class="btn btn-ghost btn-sm" type="submit">
+                  Save passcodes
+                </button>
+              </form>
+              <form
+                method="POST"
+                action={actions.tenants.delete}
+                class="ml-auto"
+                onsubmit={`return confirm(${JSON.stringify(`Delete tenant "${t.name}"? All of its sessions, votes, and participants are permanently removed, and its users are logged out. The shared place list is kept.`)})`}
+              >
+                <input type="hidden" name="id" value={t.id} />
+                <button class="btn btn-ghost btn-sm text-error" type="submit">
+                  Delete
+                </button>
+              </form>
+            </div>
+          </div>
+        </div>
+      ))
+    }
+  </div>
+</Layout>

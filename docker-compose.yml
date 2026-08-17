@@ -3,7 +3,9 @@
 # the other app stacks (`docker network create edge` if it doesn't exist yet,
 # e.g. for a local run) and publishes no host ports.
 #
-# Required in .env: SITE_HOSTNAME, SITE_PASSCODE, ADMIN_PASSCODE, SESSION_SECRET.
+# Required in .env: SITE_HOSTNAME, SUPERADMIN_PASSCODE, SESSION_SECRET.
+# Optional: SITE_PASSCODE/ADMIN_PASSCODE (first-boot seed for the Default
+# tenant's passcodes; manage tenants on /tenants afterwards).
 
 name: lunch
 
@@ -17,8 +19,9 @@ services:
     image: lunch-web:latest
     restart: unless-stopped
     environment:
-      SITE_PASSCODE: ${SITE_PASSCODE:?SITE_PASSCODE must be set}
-      ADMIN_PASSCODE: ${ADMIN_PASSCODE:?ADMIN_PASSCODE must be set}
+      SITE_PASSCODE: ${SITE_PASSCODE:-}
+      ADMIN_PASSCODE: ${ADMIN_PASSCODE:-}
+      SUPERADMIN_PASSCODE: ${SUPERADMIN_PASSCODE:?SUPERADMIN_PASSCODE must be set}
       SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET must be set}
     volumes:
       # SQLite database file (and its WAL) live here, surviving deploys.

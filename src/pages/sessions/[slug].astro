@@ -1,10 +1,11 @@
 ---
 import Layout from "@/layouts/Layout.astro";
-import { service } from "@/lib/service";
 import { TZ } from "@/lib/lunchService";
 import { todayInfo } from "@/lib/lunch";
 
-const detail = await service.sessionDetail(Astro.params.slug ?? "");
+const detail = await Astro.locals.service.sessionDetail(
+  Astro.params.slug ?? "",
+);
 if (!detail) {
   return new Response(null, { status: 404, statusText: "Not found" });
 }
@@ -31,6 +32,7 @@ const dateLabel = new Date(session.date + "T00:00:00").toLocaleDateString(
   <div class="flex flex-col gap-4">
     <div class="flex flex-wrap items-center gap-2">
       <h1 class="text-2xl font-bold">{dateLabel}</h1>
+      {session.name && <span class="badge badge-info">🚂 {session.name}</span>}
       <span class="badge badge-primary">{modeLabel[session.mode]}</span>
       {
         session.status === "finalized" ? (
@@ -46,7 +48,7 @@ const dateLabel = new Date(session.date + "T00:00:00").toLocaleDateString(
       isToday && (
         <div class="alert text-sm">
           <span>
-            This is today's session —{" "}
+            This is one of today's trains —{" "}
             <a href="/" class="link">
               go to the live page
             </a>{" "}

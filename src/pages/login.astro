@@ -1,33 +1,39 @@
 ---
 import Layout from "@/layouts/Layout.astro";
-import { passcodeMatches, sign, type Role } from "@/lib/authCookie";
+import { sign, type AuthUser } from "@/lib/authCookie";
 import { env } from "@/lib/env";
+import { tenantService } from "@/lib/service";
 import { AUTH_COOKIE } from "@/middleware";
 
 let error: string | null = null;
 
 if (Astro.request.method === "POST") {
   const form = await Astro.request.formData();
+  const organization = String(form.get("organization") ?? "").trim();
   const passcode = String(form.get("passcode") ?? "");
   const name = String(form.get("name") ?? "").trim();
 
-  let role: Role | null = null;
-  if (passcodeMatches(passcode, env.ADMIN_PASSCODE)) role = "admin";
-  else if (passcodeMatches(passcode, env.SITE_PASSCODE)) role = "member";
+  // The organization names the tenant; the passcode decides admin vs member.
+  // A blank organization is a superadmin login.
+  const match = await tenantService.resolveLogin(organization, passcode);
 
-  if (!role) {
-    error = "Wrong passcode.";
+  if (!match) {
+    error = "Wrong organization or passcode.";
   } else if (name.length === 0 || name.length > 40) {
     error = "Pick a name (max 40 characters).";
   } else {
-    Astro.cookies.set(AUTH_COOKIE, sign({ name, role }, env.SESSION_SECRET), {
+    const user: AuthUser =
+      match.role === "superadmin"
+        ? { name, role: "superadmin" }
+        : { name, role: match.role, tenantId: match.tenantId };
+    Astro.cookies.set(AUTH_COOKIE, sign(user, env.SESSION_SECRET), {
       path: "/",
       httpOnly: true,
       sameSite: "lax",
       secure: import.meta.env.PROD,
       maxAge: 60 * 60 * 24 * 180,
     });
-    return Astro.redirect("/");
+    return Astro.redirect(match.role === "superadmin" ? "/tenants" : "/");
   }
 }
 ---
@@ -38,10 +44,20 @@ if (Astro.request.method === "POST") {
       <div class="card-body">
         <h1 class="card-title text-2xl">🍽️ Lunch</h1>
         <p class="text-base-content/70 text-sm">
-          Enter the passcode and pick a name.
+          Enter your organization, the passcode, and pick a name.
         </p>
         {error && <div class="alert alert-error text-sm">{error}</div>}
         <form method="POST" class="mt-2 flex flex-col gap-3">
+          <label class="form-control">
+            <span class="label-text mb-1">Organization</span>
+            <input
+              type="text"
+              name="organization"
+              class="input input-bordered w-full"
+              maxlength="60"
+              autocomplete="organization"
+            />
+          </label>
           <label class="form-control">
             <span class="label-text mb-1">Passcode</span>
             <input

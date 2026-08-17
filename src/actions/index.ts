@@ -4,8 +4,8 @@ import type { AuthUser } from "@/lib/authCookie";
 import { parseCoords, type Coords } from "@/lib/geo";
 import { parseDateISO, parseTimeHHMM, WEEKDAY_NAMES } from "@/lib/hours";
 import { parsePriceCents } from "@/lib/money";
-import { service } from "@/lib/service";
-import { LunchError } from "@/lib/lunchService";
+import { tenantService } from "@/lib/service";
+import { LunchError, type Actor } from "@/lib/lunchService";
 import { parseTagsInput } from "@/lib/tags";
 
 function requireUser(locals: App.Locals): AuthUser {
@@ -24,6 +24,19 @@ function requireAdmin(locals: App.Locals): AuthUser {
   return user;
 }
 
+function requireSuperadmin(locals: App.Locals): AuthUser {
+  const user = requireUser(locals);
+  if (user.role !== "superadmin") {
+    throw new ActionError({ code: "FORBIDDEN", message: "Superadmin only." });
+  }
+  return user;
+}
+
+/** Train management is creator-or-admin — the service decides, given who asks. */
+function actor(user: AuthUser): Actor {
+  return { name: user.name, isAdmin: user.role !== "member" };
+}
+
 /** Converts domain rule violations into user-visible action errors. */
 async function run<T>(fn: () => Promise<T>): Promise<T> {
   try {
@@ -37,6 +50,7 @@ async function run<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 const mode = z.enum(["democracy", "dictatorship", "random"]);
+const trainId = z.string().trim().min(1).max(40);
 
 /** Empty → null; anything else must parse as "lat, lng" or is rejected. */
 function optionalCoords(coords: string | undefined): Coords | null {
@@ -79,76 +93,157 @@ const optionalTime = z.string().trim().max(10).optional();
 
 export const server = {
   lunch: {
-    join: defineAction({
-      handler: async (_input, ctx) => {
+    createTrain: defineAction({
+      input: z.object({ name: z.string().trim().min(1).max(40) }),
+      handler: async ({ name }, ctx) => {
         const user = requireUser(ctx.locals);
-        await run(() => service.join(user.name));
+        const session = await run(() =>
+          ctx.locals.service.createTrain(actor(user), name),
+        );
+        return { trainId: session.public_id };
+      },
+    }),
+    join: defineAction({
+      input: z.object({ trainId }),
+      handler: async ({ trainId }, ctx) => {
+        const user = requireUser(ctx.locals);
+        await run(() => ctx.locals.service.join(user.name, trainId));
       },
     }),
     leave: defineAction({
-      handler: async (_input, ctx) => {
+      input: z.object({ trainId }),
+      handler: async ({ trainId }, ctx) => {
         const user = requireUser(ctx.locals);
-        await run(() => service.leave(user.name));
+        await run(() => ctx.locals.service.leave(user.name, trainId));
       },
     }),
     vote: defineAction({
-      input: z.object({ placeId: z.number().int().positive() }),
-      handler: async ({ placeId }, ctx) => {
+      input: z.object({ trainId, placeId: z.number().int().positive() }),
+      handler: async ({ trainId, placeId }, ctx) => {
         const user = requireUser(ctx.locals);
-        await run(() => service.vote(user.name, placeId));
+        await run(() => ctx.locals.service.vote(user.name, trainId, placeId));
       },
     }),
     unvote: defineAction({
-      handler: async (_input, ctx) => {
+      input: z.object({ trainId }),
+      handler: async ({ trainId }, ctx) => {
         const user = requireUser(ctx.locals);
-        await run(() => service.unvote(user.name));
+        await run(() => ctx.locals.service.unvote(user.name, trainId));
       },
     }),
     setMode: defineAction({
-      input: z.object({ mode }),
-      handler: async ({ mode }, ctx) => {
-        requireAdmin(ctx.locals);
-        await run(() => service.setMode(mode));
+      input: z.object({ trainId, mode }),
+      handler: async ({ trainId, mode }, ctx) => {
+        const user = requireUser(ctx.locals);
+        await run(() => ctx.locals.service.setMode(actor(user), trainId, mode));
       },
     }),
     setDictator: defineAction({
-      input: z.object({ name: z.string().trim().min(1).max(40).nullable() }),
-      handler: async ({ name }, ctx) => {
-        requireAdmin(ctx.locals);
-        await run(() => service.setDictator(name));
+      input: z.object({
+        trainId,
+        name: z.string().trim().min(1).max(40).nullable(),
+      }),
+      handler: async ({ trainId, name }, ctx) => {
+        const user = requireUser(ctx.locals);
+        await run(() =>
+          ctx.locals.service.setDictator(actor(user), trainId, name),
+        );
       },
     }),
     dictatorPick: defineAction({
-      input: z.object({ placeId: z.number().int().positive() }),
-      handler: async ({ placeId }, ctx) => {
+      input: z.object({ trainId, placeId: z.number().int().positive() }),
+      handler: async ({ trainId, placeId }, ctx) => {
         const user = requireUser(ctx.locals);
-        await run(() => service.dictatorPick(user.name, placeId));
+        await run(() =>
+          ctx.locals.service.dictatorPick(user.name, trainId, placeId),
+        );
       },
     }),
     finalize: defineAction({
-      handler: async (_input, ctx) => {
-        requireAdmin(ctx.locals);
-        await run(() => service.finalize());
+      input: z.object({ trainId }),
+      handler: async ({ trainId }, ctx) => {
+        const user = requireUser(ctx.locals);
+        await run(() => ctx.locals.service.finalize(actor(user), trainId));
       },
     }),
     reopen: defineAction({
-      handler: async (_input, ctx) => {
-        requireAdmin(ctx.locals);
-        await run(() => service.reopen());
+      input: z.object({ trainId }),
+      handler: async ({ trainId }, ctx) => {
+        const user = requireUser(ctx.locals);
+        await run(() => ctx.locals.service.reopen(actor(user), trainId));
       },
     }),
     forceStart: defineAction({
       handler: async (_input, ctx) => {
         requireAdmin(ctx.locals);
-        await run(() => service.forceStartToday());
+        await run(() => ctx.locals.service.forceStartToday());
       },
     }),
     deleteSession: defineAction({
       accept: "form",
       input: z.object({ publicId: z.string().trim().min(1).max(40) }),
       handler: async ({ publicId }, ctx) => {
-        requireAdmin(ctx.locals);
-        await run(() => service.deleteSession(publicId));
+        const user = requireUser(ctx.locals);
+        await run(() =>
+          ctx.locals.service.deleteSession(actor(user), publicId),
+        );
+      },
+    }),
+  },
+  tenants: {
+    create: defineAction({
+      accept: "form",
+      input: z.object({
+        name: z.string().trim().min(1).max(60),
+        sitePasscode: z.string().trim().max(100).optional(),
+        adminPasscode: z.string().trim().max(100).optional(),
+      }),
+      handler: async (input, ctx) => {
+        requireSuperadmin(ctx.locals);
+        await run(() =>
+          tenantService.createTenant({
+            name: input.name,
+            sitePasscode: input.sitePasscode || undefined,
+            adminPasscode: input.adminPasscode || undefined,
+          }),
+        );
+      },
+    }),
+    rename: defineAction({
+      accept: "form",
+      input: z.object({
+        id: z.number().int().positive(),
+        name: z.string().trim().min(1).max(60),
+      }),
+      handler: async ({ id, name }, ctx) => {
+        requireSuperadmin(ctx.locals);
+        await run(() => tenantService.renameTenant(id, name));
+      },
+    }),
+    setPasscodes: defineAction({
+      accept: "form",
+      input: z.object({
+        id: z.number().int().positive(),
+        // Blank = leave unchanged
+        sitePasscode: z.string().trim().max(100).optional(),
+        adminPasscode: z.string().trim().max(100).optional(),
+      }),
+      handler: async (input, ctx) => {
+        requireSuperadmin(ctx.locals);
+        await run(() =>
+          tenantService.setPasscodes(input.id, {
+            sitePasscode: input.sitePasscode || undefined,
+            adminPasscode: input.adminPasscode || undefined,
+          }),
+        );
+      },
+    }),
+    delete: defineAction({
+      accept: "form",
+      input: z.object({ id: z.number().int().positive() }),
+      handler: async ({ id }, ctx) => {
+        requireSuperadmin(ctx.locals);
+        await run(() => tenantService.deleteTenant(id));
       },
     }),
   },
@@ -164,7 +259,7 @@ export const server = {
         const user = requireUser(ctx.locals);
         const priceCents = requirePriceCents(price);
         await run(() =>
-          service.addMenuItem({
+          ctx.locals.service.addMenuItem({
             placeId,
             name,
             priceCents,
@@ -183,7 +278,7 @@ export const server = {
         const user = requireUser(ctx.locals);
         const priceCents = requirePriceCents(price);
         await run(() =>
-          service.recordPrice({
+          ctx.locals.service.recordPrice({
             menuItemId: itemId,
             priceCents,
             recordedBy: user.name,
@@ -196,7 +291,7 @@ export const server = {
       input: z.object({ itemId: z.number().int().positive() }),
       handler: async ({ itemId }, ctx) => {
         requireAdmin(ctx.locals);
-        await run(() => service.deleteMenuItem(itemId));
+        await run(() => ctx.locals.service.deleteMenuItem(itemId));
       },
     }),
   },
@@ -216,7 +311,7 @@ export const server = {
         const user = requireUser(ctx.locals);
         const coords = optionalCoords(input.coords);
         await run(() =>
-          service.addPlace({
+          ctx.locals.service.addPlace({
             name: input.name,
             url: input.url || null,
             notes: input.notes || null,
@@ -246,7 +341,7 @@ export const server = {
         requireAdmin(ctx.locals);
         const coords = optionalCoords(input.coords);
         return await run(() =>
-          service.editPlace({
+          ctx.locals.service.editPlace({
             id: input.id,
             name: input.name,
             url: input.url || null,
@@ -265,7 +360,7 @@ export const server = {
       input: z.object({ id: z.number().int().positive() }),
       handler: async ({ id }, ctx) => {
         requireAdmin(ctx.locals);
-        await run(() => service.deletePlace(id));
+        await run(() => ctx.locals.service.deletePlace(id));
       },
     }),
     rate: defineAction({
@@ -277,7 +372,11 @@ export const server = {
       handler: async ({ placeId, rating }, ctx) => {
         const user = requireUser(ctx.locals);
         await run(() =>
-          service.ratePlace({ placeId, rating, raterName: user.name }),
+          ctx.locals.service.ratePlace({
+            placeId,
+            rating,
+            raterName: user.name,
+          }),
         );
       },
     }),
@@ -293,7 +392,7 @@ export const server = {
         if (raterName.toLowerCase() !== user.name.toLowerCase()) {
           requireAdmin(ctx.locals);
         }
-        await run(() => service.deleteRating(placeId, raterName));
+        await run(() => ctx.locals.service.deleteRating(placeId, raterName));
       },
     }),
     deleteRatingEntry: defineAction({
@@ -303,7 +402,7 @@ export const server = {
         const user = requireUser(ctx.locals);
         // Members prune their own history; admins prune anyone's.
         await run(() =>
-          service.deleteRatingEntry(
+          ctx.locals.service.deleteRatingEntry(
             ratingId,
             user.role === "admin" ? undefined : user.name,
           ),
@@ -318,7 +417,7 @@ export const server = {
       }),
       handler: async ({ id, archived }, ctx) => {
         requireAdmin(ctx.locals);
-        await run(() => service.setPlaceArchived(id, archived));
+        await run(() => ctx.locals.service.setPlaceArchived(id, archived));
       },
     }),
     setHours: defineAction({
@@ -409,7 +508,7 @@ export const server = {
           }
           hours.push({ weekday, open, close, lunchOpen, lunchClose });
         }
-        await run(() => service.setPlaceHours(input.placeId, hours));
+        await run(() => ctx.locals.service.setPlaceHours(input.placeId, hours));
       },
     }),
     addClosure: defineAction({
@@ -425,7 +524,7 @@ export const server = {
         const startDate = requireDateISO(input.startDate);
         const endDate = requireDateISO(input.endDate);
         await run(() =>
-          service.addClosure({
+          ctx.locals.service.addClosure({
             placeId: input.placeId,
             startDate,
             endDate,
@@ -440,7 +539,7 @@ export const server = {
       input: z.object({ closureId: z.number().int().positive() }),
       handler: async ({ closureId }, ctx) => {
         requireAdmin(ctx.locals);
-        await run(() => service.deleteClosure(closureId));
+        await run(() => ctx.locals.service.deleteClosure(closureId));
       },
     }),
   },

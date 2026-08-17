@@ -6,7 +6,6 @@ import { actions } from "astro:actions";
 import { WEEKDAY_NAMES } from "@/lib/hours";
 import { todayInfo } from "@/lib/lunch";
 import { formatPrice } from "@/lib/money";
-import { service } from "@/lib/service";
 import { TZ } from "@/lib/lunchService";
 import { parseTagsJson } from "@/lib/tags";
 
@@ -18,7 +17,7 @@ if (editResult?.data && editResult.data.slug !== Astro.params.slug) {
 }
 const editError = editResult?.error?.message;
 
-const detail = await service.placeDetail(Astro.params.slug ?? "");
+const detail = await Astro.locals.service.placeDetail(Astro.params.slug ?? "");
 if (!detail) {
   return new Response(null, { status: 404, statusText: "Not found" });
 }
@@ -37,7 +36,7 @@ const user = Astro.locals.user;
 const isAdmin = user.role === "admin";
 const { date: today } = todayInfo(new Date(), TZ);
 
-const canRate = await service.canRate(place.id, user.name);
+const canRate = await Astro.locals.service.canRate(place.id, user.name);
 const myRating =
   ratings.current.find(
     (r) => r.rater_name.toLowerCase() === user.name.toLowerCase(),
@@ -760,6 +759,11 @@ const modeEmoji: Record<string, string> = {
                   <a href={`/sessions/${s.public_id}`} class="link">
                     {s.date}
                   </a>{" "}
+                  {s.name && (
+                    <span class="text-base-content/60 text-sm">
+                      🚂 {s.name}
+                    </span>
+                  )}{" "}
                   <span class="text-base-content/60 text-sm">
                     {modeEmoji[s.mode]} {s.mode}
                   </span>
