@@ -319,6 +319,22 @@ const modeEmoji: Record<string, string> = {
                         class="input input-bordered input-xs"
                         value={h?.close_time ?? ""}
                       />
+                      <button
+                        type="button"
+                        class:list={[
+                          "btn btn-ghost btn-xs",
+                          i === 0 && "invisible",
+                        ]}
+                        title={
+                          i > 0
+                            ? `Copy ${WEEKDAY_NAMES[i - 1]}'s hours`
+                            : undefined
+                        }
+                        onclick={`this.form.open${i + 1}.value = this.form.open${i}.value; this.form.close${i + 1}.value = this.form.close${i}.value;`}
+                        disabled={i === 0}
+                      >
+                        ↑ copy
+                      </button>
                     </label>
                   );
                 })}
