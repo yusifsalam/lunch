@@ -1,7 +1,8 @@
 import { actions } from "astro:actions";
 import { useEffect, useRef, useState } from "preact/hooks";
 import type { AuthUser } from "@/lib/authCookie";
-import type { Snapshot } from "@/lib/lunchService";
+import { timeOfDay } from "@/lib/lunch";
+import { TZ, type Snapshot } from "@/lib/lunchService";
 
 interface Props {
   initial: Snapshot;
@@ -15,6 +16,17 @@ const MODES = [
   { value: "dictatorship", label: "👑 Dictatorship" },
   { value: "random", label: "🎲 Random" },
 ] as const;
+
+// Automatic polling only runs around lunchtime, in Helsinki time like the
+// rest of the "today" logic. Tab-focus and post-action refreshes still work
+// outside the window.
+const POLL_FROM = "10:00";
+const POLL_UNTIL = "15:00";
+
+function inPollingWindow(): boolean {
+  const time = timeOfDay(new Date(), TZ);
+  return time >= POLL_FROM && time < POLL_UNTIL;
+}
 
 export default function SessionView({ initial, user }: Props) {
   const [snap, setSnap] = useState<Snapshot>(initial);
@@ -42,7 +54,7 @@ export default function SessionView({ initial, user }: Props) {
 
   useEffect(() => {
     const interval = setInterval(() => {
-      if (!document.hidden) refresh();
+      if (!document.hidden && inPollingWindow()) refresh();
     }, 5000);
     const onVisible = () => {
       if (!document.hidden) refresh();
