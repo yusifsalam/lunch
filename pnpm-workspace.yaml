@@ -1,0 +1,5 @@
+allowBuilds:
+# better-sqlite3 ships prebuilds in its npm tarball; approving its build script
+# would run node-gyp, which the slim Docker image has no toolchain for.
+  better-sqlite3: false
+  esbuild: true

@@ -2,12 +2,7 @@
   "name": "lunch",
   "type": "module",
   "version": "0.0.1",
-  "packageManager": "pnpm@10.29.2",
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "esbuild"
-    ]
-  },
+  "packageManager": "pnpm@11.22.0",
   "engines": {
     "node": ">=22.12.0"
   },

@@ -2,18 +2,21 @@
 
 # Multi-stage build for the Astro node standalone server (pnpm).
 # node:24-slim: better-sqlite3 (v13+) ships prebuilds in its npm tarball, so
-# the install needs no native toolchain — as long as better-sqlite3 stays out
-# of pnpm.onlyBuiltDependencies, which would trigger a node-gyp source build.
+# the install needs no native toolchain — as long as better-sqlite3 stays
+# unapproved in pnpm-workspace.yaml allowBuilds, which would trigger a
+# node-gyp source build.
 FROM node:24-slim AS base
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
+# Non-interactive pnpm: image builds have no TTY for confirmation prompts.
+ENV CI=true
 RUN corepack enable
 WORKDIR /app
 
 # Full install (incl. dev deps) + build. Everything is SSR — no database
 # needed at build time.
 FROM base AS build
-COPY package.json pnpm-lock.yaml ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile
 COPY . .
 # Public hostname baked into the build: astro.config.mjs turns it into
@@ -24,7 +27,7 @@ RUN pnpm build
 
 # Production-only dependencies, resolved separately so dev deps stay out of the image.
 FROM base AS prod-deps
-COPY package.json pnpm-lock.yaml ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile --prod
 
 # Slim runtime: prod node_modules + built output + migrations.
