@@ -570,6 +570,155 @@ describe("places", () => {
   });
 });
 
+describe("ratings", () => {
+  /** Ada eats at the place: votes for it and the session finalizes on it. */
+  async function visit(placeId: number, name = "Ada") {
+    await service.vote(name, placeId);
+    await service.finalize();
+  }
+
+  it("only participants of a finalized session that chose the place can rate", async () => {
+    const [sushi, pizza] = await addPlaces("Sushi", "Pizza");
+    await visit(sushi!);
+    await service.ratePlace({ placeId: sushi!, rating: 5, raterName: "Ada" });
+    await expect(
+      service.ratePlace({ placeId: pizza!, rating: 5, raterName: "Ada" }),
+    ).rejects.toThrow(/eating there/);
+    await expect(
+      service.ratePlace({ placeId: sushi!, rating: 5, raterName: "Bob" }),
+    ).rejects.toThrow(/eating there/);
+    expect(await service.canRate(sushi!, "Ada")).toBe(true);
+    expect(await service.canRate(sushi!, "Bob")).toBe(false);
+  });
+
+  it("late joiners of a finalized session ate there too and can rate", async () => {
+    const [a] = await addPlaces("Sushi");
+    await visit(a!);
+    await service.join("Bob");
+    await service.ratePlace({ placeId: a!, rating: 4, raterName: "Bob" });
+  });
+
+  it("appends changes newest-first, skips unchanged, averages current ratings", async () => {
+    const [a] = await addPlaces("Sushi");
+    await service.vote("Ada", a!);
+    await service.vote("Bob", a!);
+    await service.finalize();
+    await service.ratePlace({ placeId: a!, rating: 5, raterName: "Ada" });
+    await service.ratePlace({ placeId: a!, rating: 5, raterName: "Ada" }); // unchanged → no new row
+    await service.ratePlace({ placeId: a!, rating: 3, raterName: "Ada" });
+    await service.ratePlace({ placeId: a!, rating: 4, raterName: "Bob" });
+    const { ratings } = (await service.placeDetail("sushi"))!;
+    expect(ratings.history.map((r) => r.rating)).toEqual([4, 3, 5]);
+    expect(ratings.current.map((r) => [r.rater_name, r.rating]).sort()).toEqual(
+      [
+        ["Ada", 3],
+        ["Bob", 4],
+      ],
+    );
+    expect(ratings.average).toBe(3.5);
+  });
+
+  it("rater identity is case-insensitive", async () => {
+    const [a] = await addPlaces("Sushi");
+    await visit(a!);
+    await service.ratePlace({ placeId: a!, rating: 5, raterName: "Ada" });
+    await service.ratePlace({ placeId: a!, rating: 5, raterName: "ada" }); // unchanged for the same person
+    await service.ratePlace({ placeId: a!, rating: 4, raterName: "ADA" });
+    const { ratings } = (await service.placeDetail("sushi"))!;
+    expect(ratings.history).toHaveLength(2);
+    expect(ratings.current).toHaveLength(1);
+    expect(ratings.current[0]!.rating).toBe(4);
+  });
+
+  it("reopening the session suspends eligibility until re-finalized", async () => {
+    const [a] = await addPlaces("Sushi");
+    await visit(a!);
+    await service.reopen();
+    await expect(
+      service.ratePlace({ placeId: a!, rating: 5, raterName: "Ada" }),
+    ).rejects.toThrow(LunchError);
+    await service.finalize();
+    await service.ratePlace({ placeId: a!, rating: 5, raterName: "Ada" });
+  });
+
+  it("archived places stay rateable and keep their history", async () => {
+    const [a] = await addPlaces("Sushi");
+    await visit(a!);
+    await service.ratePlace({ placeId: a!, rating: 2, raterName: "Ada" });
+    await service.setPlaceArchived(a!, true);
+    await service.ratePlace({ placeId: a!, rating: 3, raterName: "Ada" });
+    const { ratings } = (await service.placeDetail("sushi"))!;
+    expect(ratings.history).toHaveLength(2);
+  });
+
+  it("accepts half-star ratings and averages them", async () => {
+    const [a] = await addPlaces("Sushi");
+    await service.vote("Ada", a!);
+    await service.vote("Bob", a!);
+    await service.finalize();
+    await service.ratePlace({ placeId: a!, rating: 2.5, raterName: "Ada" });
+    await service.ratePlace({ placeId: a!, rating: 0.5, raterName: "Bob" });
+    const { ratings } = (await service.placeDetail("sushi"))!;
+    expect(ratings.current.map((r) => r.rating).sort()).toEqual([0.5, 2.5]);
+    expect(ratings.average).toBe(1.5);
+  });
+
+  it("deleting a rating removes that rater's history only, case-insensitively", async () => {
+    const [a] = await addPlaces("Sushi");
+    await service.vote("Ada", a!);
+    await service.vote("Bob", a!);
+    await service.finalize();
+    await service.ratePlace({ placeId: a!, rating: 5, raterName: "Ada" });
+    await service.ratePlace({ placeId: a!, rating: 3, raterName: "Ada" });
+    await service.ratePlace({ placeId: a!, rating: 4, raterName: "Bob" });
+    await service.deleteRating(a!, "ada");
+    const { ratings } = (await service.placeDetail("sushi"))!;
+    expect(ratings.history.map((r) => r.rater_name)).toEqual(["Bob"]);
+    expect(ratings.average).toBe(4);
+    // Ada ate there, so she may rate again from scratch.
+    await service.ratePlace({ placeId: a!, rating: 2, raterName: "Ada" });
+  });
+
+  it("deleting the newest history entry reverts the current rating", async () => {
+    const [a] = await addPlaces("Sushi");
+    await visit(a!);
+    await service.ratePlace({ placeId: a!, rating: 5, raterName: "Ada" });
+    await service.ratePlace({ placeId: a!, rating: 2, raterName: "Ada" });
+    let { ratings } = (await service.placeDetail("sushi"))!;
+    await service.deleteRatingEntry(ratings.history[0]!.id, "ada"); // case-insensitive owner
+    ({ ratings } = (await service.placeDetail("sushi"))!);
+    expect(ratings.history.map((r) => r.rating)).toEqual([5]);
+    expect(ratings.current[0]!.rating).toBe(5);
+    expect(ratings.average).toBe(5);
+  });
+
+  it("the owner constraint blocks deleting someone else's entry", async () => {
+    const [a] = await addPlaces("Sushi");
+    await visit(a!);
+    await service.ratePlace({ placeId: a!, rating: 5, raterName: "Ada" });
+    const id = (await service.placeDetail("sushi"))!.ratings.history[0]!.id;
+    await expect(service.deleteRatingEntry(id, "Bob")).rejects.toThrow(
+      /isn't yours/,
+    );
+    await service.deleteRatingEntry(id); // unconstrained — the admin path
+    expect((await service.placeDetail("sushi"))!.ratings.history).toEqual([]);
+    await expect(service.deleteRatingEntry(id)).rejects.toThrow(LunchError);
+  });
+
+  it("rejects out-of-range, off-step, and unknown-place ratings", async () => {
+    const [a] = await addPlaces("Sushi");
+    await visit(a!);
+    for (const rating of [0, 5.5, 3.25]) {
+      await expect(
+        service.ratePlace({ placeId: a!, rating, raterName: "Ada" }),
+      ).rejects.toThrow(/half-star/);
+    }
+    await expect(
+      service.ratePlace({ placeId: 999, rating: 3, raterName: "Ada" }),
+    ).rejects.toThrow(/doesn't exist/);
+  });
+});
+
 describe("opening hours and closures", () => {
   // FRIDAY = ISO weekday 5. Hours only on Monday → closed on Fridays.
   const mondayOnly = [{ weekday: 1, open: "11:00", close: "14:00" }];

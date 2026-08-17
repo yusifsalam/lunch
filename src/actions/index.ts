@@ -268,6 +268,48 @@ export const server = {
         await run(() => service.deletePlace(id));
       },
     }),
+    rate: defineAction({
+      accept: "form",
+      input: z.object({
+        placeId: z.number().int().positive(),
+        rating: z.number().multipleOf(0.5).min(0.5).max(5),
+      }),
+      handler: async ({ placeId, rating }, ctx) => {
+        const user = requireUser(ctx.locals);
+        await run(() =>
+          service.ratePlace({ placeId, rating, raterName: user.name }),
+        );
+      },
+    }),
+    deleteRating: defineAction({
+      accept: "form",
+      input: z.object({
+        placeId: z.number().int().positive(),
+        raterName: z.string().trim().min(1).max(40),
+      }),
+      handler: async ({ placeId, raterName }, ctx) => {
+        const user = requireUser(ctx.locals);
+        // Members remove their own rating; anyone else's takes an admin.
+        if (raterName.toLowerCase() !== user.name.toLowerCase()) {
+          requireAdmin(ctx.locals);
+        }
+        await run(() => service.deleteRating(placeId, raterName));
+      },
+    }),
+    deleteRatingEntry: defineAction({
+      accept: "form",
+      input: z.object({ ratingId: z.number().int().positive() }),
+      handler: async ({ ratingId }, ctx) => {
+        const user = requireUser(ctx.locals);
+        // Members prune their own history; admins prune anyone's.
+        await run(() =>
+          service.deleteRatingEntry(
+            ratingId,
+            user.role === "admin" ? undefined : user.name,
+          ),
+        );
+      },
+    }),
     setArchived: defineAction({
       accept: "form",
       input: z.object({

@@ -477,6 +477,123 @@ export function createService(db: Kysely<DB>, deps: ServiceDeps = {}) {
     await db.deleteFrom("menu_item").where("id", "=", id).execute();
   }
 
+  // --- ratings ---
+
+  /** True once `name` has eaten at the place: they were a participant of a
+   * finalized session whose outcome was this place. */
+  async function canRate(placeId: number, name: string): Promise<boolean> {
+    // TEMP: preview escape hatch — RATE_WITHOUT_VISIT=1 lets anyone rate.
+    // Remove once the rating UI has been reviewed.
+    if (
+      (process.env.RATE_WITHOUT_VISIT ??
+        import.meta.env?.RATE_WITHOUT_VISIT) === "1"
+    ) {
+      return true;
+    }
+    const row = await db
+      .selectFrom("session")
+      .innerJoin("participant", "participant.session_id", "session.id")
+      .select("session.id")
+      .where("session.chosen_place_id", "=", placeId)
+      .where("session.status", "=", "finalized")
+      .where("participant.name", "=", name)
+      .limit(1)
+      .executeTakeFirst();
+    return row !== undefined;
+  }
+
+  async function ratePlace(input: {
+    placeId: number;
+    rating: number;
+    raterName: string;
+  }) {
+    if (
+      !Number.isInteger(input.rating * 2) ||
+      input.rating < 0.5 ||
+      input.rating > 5
+    ) {
+      throw new LunchError("A rating is ½–5 stars, in half-star steps.");
+    }
+    const place = await db
+      .selectFrom("place")
+      .select("id")
+      .where("id", "=", input.placeId)
+      .executeTakeFirst();
+    if (!place) throw new LunchError("That place doesn't exist.");
+    // Archived places stay rateable: the visit already happened.
+    if (!(await canRate(input.placeId, input.raterName))) {
+      throw new LunchError(
+        "You can rate a place after eating there on a lunch day.",
+      );
+    }
+    const latest = await db
+      .selectFrom("place_rating")
+      .select("rating")
+      .where("place_id", "=", input.placeId)
+      .where("rater_name", "=", input.raterName)
+      .orderBy("rated_at", "desc")
+      .orderBy("id", "desc")
+      .executeTakeFirst();
+    // Same rating again is "still feel that way" — history only records changes.
+    if (latest?.rating === input.rating) return;
+    await db
+      .insertInto("place_rating")
+      .values({
+        place_id: input.placeId,
+        rater_name: input.raterName,
+        rating: input.rating,
+      })
+      .execute();
+  }
+
+  /** Full rating history (newest first), each rater's current rating, and
+   * the average of the current ratings. */
+  async function ratingsFor(placeId: number) {
+    const history = await db
+      .selectFrom("place_rating")
+      .selectAll()
+      .where("place_id", "=", placeId)
+      .orderBy("rated_at", "desc")
+      .orderBy("id", "desc")
+      .execute();
+    const byRater = new Map<string, (typeof history)[number]>();
+    for (const r of history) {
+      const key = r.rater_name.toLowerCase();
+      if (!byRater.has(key)) byRater.set(key, r);
+    }
+    const current = [...byRater.values()];
+    const average =
+      current.length > 0
+        ? current.reduce((sum, r) => sum + r.rating, 0) / current.length
+        : null;
+    return { history, current, average };
+  }
+
+  /** Removes a rater's rating for a place, history included. Whose ratings
+   * the caller may remove (own vs. anyone's) is the action layer's concern. */
+  async function deleteRating(placeId: number, raterName: string) {
+    await db
+      .deleteFrom("place_rating")
+      .where("place_id", "=", placeId)
+      .where("rater_name", "=", raterName)
+      .execute();
+  }
+
+  /** Removes a single rating history entry. Deleting a rater's newest entry
+   * reverts their current rating to the previous one. `onlyOwnedBy` limits
+   * the delete to that rater's own entries — the member path; the admin
+   * path passes no constraint (roles are the action layer's concern). */
+  async function deleteRatingEntry(id: number, onlyOwnedBy?: string) {
+    let query = db.deleteFrom("place_rating").where("id", "=", id);
+    if (onlyOwnedBy !== undefined) {
+      query = query.where("rater_name", "=", onlyOwnedBy);
+    }
+    const result = await query.executeTakeFirst();
+    if (result.numDeletedRows === 0n) {
+      throw new LunchError("That rating entry doesn't exist (or isn't yours).");
+    }
+  }
+
   /** Read-only view of a place by slug, with its lunch track record — null if unknown. */
   async function placeDetail(slug: string) {
     const place = await db
@@ -517,6 +634,7 @@ export function createService(db: Kysely<DB>, deps: ServiceDeps = {}) {
       menu,
       hours,
       closures,
+      ratings: await ratingsFor(place.id),
       closedReason: closedReason(hours, closures, todayInfo(now(), TZ)),
     };
   }
@@ -771,6 +889,10 @@ export function createService(db: Kysely<DB>, deps: ServiceDeps = {}) {
     sessionDetail,
     deleteSession,
     placeDetail,
+    canRate,
+    ratePlace,
+    deleteRating,
+    deleteRatingEntry,
     addMenuItem,
     recordPrice,
     deleteMenuItem,

@@ -48,6 +48,15 @@ export interface PlaceClosureTable {
   created_at: Generated<string>;
 }
 
+export interface PlaceRatingTable {
+  id: Generated<number>;
+  place_id: number;
+  rater_name: string;
+  /** 0.5–5 stars in half-star steps; a rater's newest row is their current rating */
+  rating: number;
+  rated_at: Generated<string>;
+}
+
 export interface MenuItemTable {
   id: Generated<number>;
   place_id: number;
@@ -95,6 +104,7 @@ export interface DB {
   place: PlaceTable;
   place_hours: PlaceHoursTable;
   place_closure: PlaceClosureTable;
+  place_rating: PlaceRatingTable;
   menu_item: MenuItemTable;
   menu_item_price: MenuItemPriceTable;
   session: SessionTable;

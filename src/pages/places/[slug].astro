@@ -23,10 +23,33 @@ if (!detail) {
   return new Response(null, { status: 404, statusText: "Not found" });
 }
 
-const { place, chosenIn, totalVotes, menu, hours, closures, closedReason } =
-  detail;
-const isAdmin = Astro.locals.user.role === "admin";
+const {
+  place,
+  chosenIn,
+  totalVotes,
+  menu,
+  hours,
+  closures,
+  ratings,
+  closedReason,
+} = detail;
+const user = Astro.locals.user;
+const isAdmin = user.role === "admin";
 const { date: today } = todayInfo(new Date(), TZ);
+
+const canRate = await service.canRate(place.id, user.name);
+const myRating =
+  ratings.current.find(
+    (r) => r.rater_name.toLowerCase() === user.name.toLowerCase(),
+  )?.rating ?? null;
+const rateError =
+  Astro.getActionResult(actions.places.rate)?.error?.message ??
+  Astro.getActionResult(actions.places.deleteRating)?.error?.message ??
+  Astro.getActionResult(actions.places.deleteRatingEntry)?.error?.message;
+const stars = (n: number) =>
+  "★".repeat(Math.floor(n)) +
+  (Number.isInteger(n) ? "" : "½") +
+  "☆".repeat(5 - Math.ceil(n));
 
 const addItemResult = Astro.getActionResult(actions.menu.addItem);
 const recordPriceResult = Astro.getActionResult(actions.menu.recordPrice);
@@ -255,6 +278,141 @@ const modeEmoji: Record<string, string> = {
       <div class="stat">
         <div class="stat-title">Votes received</div>
         <div class="stat-value">{totalVotes}</div>
+      </div>
+      <div class="stat">
+        <div class="stat-title">Rating</div>
+        <div class="stat-value">
+          {ratings.average === null ? "—" : `${ratings.average.toFixed(1)} ★`}
+        </div>
+        {
+          ratings.current.length > 0 && (
+            <div class="stat-desc">
+              {ratings.current.length}{" "}
+              {ratings.current.length === 1 ? "rating" : "ratings"}
+            </div>
+          )
+        }
+      </div>
+    </div>
+
+    <div class="card bg-base-100 shadow-sm">
+      <div class="card-body py-4">
+        <h2 class="text-sm font-semibold uppercase opacity-60">Ratings</h2>
+        {rateError && <div class="alert alert-error text-sm">{rateError}</div>}
+        {
+          ratings.current.length === 0 && (
+            <p class="text-base-content/60 text-sm">No ratings yet.</p>
+          )
+        }
+        <ul class="flex flex-col gap-0.5 text-sm">
+          {
+            ratings.current.map((r) => (
+              <li class="flex items-center gap-2">
+                <span class="w-28">{r.rater_name}</span>
+                <span class="text-amber-400" aria-label={`${r.rating} of 5`}>
+                  {stars(r.rating)}
+                </span>
+                <span class="text-base-content/50 text-xs">
+                  {r.rated_at.slice(0, 10)}
+                </span>
+                {(isAdmin ||
+                  r.rater_name.toLowerCase() === user.name.toLowerCase()) && (
+                  <form
+                    method="POST"
+                    action={actions.places.deleteRating}
+                    onsubmit={`return confirm(${JSON.stringify(`Remove ${r.rater_name}'s rating and its history?`)})`}
+                  >
+                    <input type="hidden" name="placeId" value={place.id} />
+                    <input
+                      type="hidden"
+                      name="raterName"
+                      value={r.rater_name}
+                    />
+                    <button
+                      class="btn btn-ghost btn-xs text-error"
+                      type="submit"
+                    >
+                      Remove
+                    </button>
+                  </form>
+                )}
+              </li>
+            ))
+          }
+        </ul>
+        {
+          canRate ? (
+            <form
+              method="POST"
+              action={actions.places.rate}
+              class="mt-2 flex items-center gap-3"
+            >
+              <input type="hidden" name="placeId" value={place.id} />
+              <div class="rating rating-half rating-anim">
+                {Array.from({ length: 10 }, (_, i) => (i + 1) / 2).map((n) => (
+                  <input
+                    type="radio"
+                    name="rating"
+                    value={n}
+                    class:list={[
+                      "mask mask-star-2 bg-amber-400",
+                      Number.isInteger(n) ? "mask-half-2" : "mask-half-1",
+                    ]}
+                    aria-label={`${n} star${n === 1 ? "" : "s"}`}
+                    checked={myRating === n}
+                    required
+                  />
+                ))}
+              </div>
+              <button class="btn btn-primary btn-sm" type="submit">
+                {myRating === null ? "Rate" : "Update rating"}
+              </button>
+            </form>
+          ) : (
+            <p class="text-base-content/50 text-xs">
+              You can rate {place.name} after eating there on a lunch day.
+            </p>
+          )
+        }
+        {
+          ratings.history.length > ratings.current.length && (
+            <details>
+              <summary class="text-base-content/60 cursor-pointer text-xs select-none">
+                Rating history ({ratings.history.length})
+              </summary>
+              <ul class="text-base-content/70 flex flex-col gap-0.5 py-2 pl-2 text-sm">
+                {ratings.history.map((r) => (
+                  <li class="flex items-center gap-2">
+                    <span>
+                      <span class="text-amber-400">{stars(r.rating)}</span>
+                      <span class="text-base-content/50 text-xs">
+                        {" "}
+                        — {r.rated_at.slice(0, 10)} by {r.rater_name}
+                      </span>
+                    </span>
+                    {(isAdmin ||
+                      r.rater_name.toLowerCase() ===
+                        user.name.toLowerCase()) && (
+                      <form
+                        method="POST"
+                        action={actions.places.deleteRatingEntry}
+                        onsubmit={`return confirm(${JSON.stringify(`Delete this ${r.rating}-star entry by ${r.rater_name}? Deleting the newest one reverts to the previous rating.`)})`}
+                      >
+                        <input type="hidden" name="ratingId" value={r.id} />
+                        <button
+                          class="btn btn-ghost btn-xs text-error"
+                          type="submit"
+                        >
+                          Delete
+                        </button>
+                      </form>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )
+        }
       </div>
     </div>
 
@@ -616,3 +774,57 @@ const modeEmoji: Record<string, string> = {
     <a href="/places" class="link text-sm">← All places</a>
   </div>
 </Layout>
+
+<!-- Rating-picker animations. Global on purpose: daisyUI paints the fill via
+     opacity inside @layer, and only unlayered rules reliably override it. -->
+<style is:global>
+  .rating-anim input {
+    transition:
+      opacity 0.15s ease,
+      scale 0.18s ease,
+      filter 0.18s ease;
+  }
+  /* Halves scale from the star's center seam so each star grows as one. */
+  .rating-anim input:nth-child(odd) {
+    transform-origin: 100% 50%;
+  }
+  .rating-anim input:nth-child(even) {
+    transform-origin: 0% 50%;
+  }
+  /* Hover preview: light the stars up to the cursor, dim the rest. */
+  .rating-anim:hover input {
+    opacity: 0.2;
+  }
+  .rating-anim:hover input:hover,
+  .rating-anim:hover input:has(~ input:hover) {
+    opacity: 1;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    /* The star under the cursor (both halves) springs up… */
+    .rating-anim input:hover,
+    .rating-anim input:nth-child(odd):hover + input,
+    .rating-anim input:has(+ input:nth-child(even):hover) {
+      scale: 1.25;
+      filter: brightness(1.1);
+    }
+    /* …and the chosen star pops when the pick lands. */
+    .rating-anim input:checked,
+    .rating-anim input:nth-child(odd):checked + input,
+    .rating-anim input:has(+ input:nth-child(even):checked) {
+      animation: star-pop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+  }
+  @keyframes star-pop {
+    0% {
+      scale: 1;
+    }
+    40% {
+      scale: 1.4;
+      filter: brightness(1.3);
+    }
+    100% {
+      scale: 1;
+      filter: brightness(1);
+    }
+  }
+</style>
