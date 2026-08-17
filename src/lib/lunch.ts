@@ -27,6 +27,17 @@ export function todayInfo(now: Date, tz: string): TodayInfo {
   return { date, isWeekday, weekday };
 }
 
+/** 'HH:MM' 24h wall-clock in the given timezone — compares as a string
+ * against stored times like a train's join deadline. */
+export function timeOfDay(now: Date, tz: string): string {
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: tz,
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).format(now);
+}
+
 /** placeId → number of votes */
 export function tally(votes: { place_id: number }[]): Map<number, number> {
   const counts = new Map<number, number>();

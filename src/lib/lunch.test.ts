@@ -3,11 +3,22 @@ import {
   decideFinalize,
   pickWinner,
   tally,
+  timeOfDay,
   todayInfo,
   type FinalizeInput,
 } from "./lunch";
 
 const HELSINKI = "Europe/Helsinki";
+
+describe("timeOfDay", () => {
+  it("formats the wall-clock HH:MM in the given timezone", () => {
+    expect(timeOfDay(new Date("2026-08-14T09:05:00Z"), HELSINKI)).toBe("12:05");
+  });
+
+  it("midnight is 00:00, not 24:00", () => {
+    expect(timeOfDay(new Date("2026-08-14T21:00:00Z"), HELSINKI)).toBe("00:00");
+  });
+});
 
 describe("todayInfo", () => {
   it("returns the date in the given timezone", () => {

@@ -100,6 +100,9 @@ export interface SessionTable {
   dictator_name: string | null;
   chosen_place_id: number | null;
   finalized_at: string | null;
+  /** 'HH:MM' Helsinki wall-clock join deadline; joining later is allowed but
+   * warned about. NULL = no deadline. */
+  join_before: string | null;
   created_at: Generated<string>;
 }
 

@@ -1,7 +1,7 @@
 import type { Kysely, Selectable } from "kysely";
 import type { DB, SessionMode, SessionTable } from "@/db/types";
-import { closedReason, WEEKDAY_NAMES } from "./hours";
-import { decideFinalize, todayInfo, type Rng } from "./lunch";
+import { closedReason, parseTimeHHMM, WEEKDAY_NAMES } from "./hours";
+import { decideFinalize, timeOfDay, todayInfo, type Rng } from "./lunch";
 import { generateSlug, slugify } from "./slug";
 
 export type SessionRow = Selectable<SessionTable>;
@@ -10,6 +10,9 @@ export type SessionRow = Selectable<SessionTable>;
 export class LunchError extends Error {}
 
 export const TZ = "Europe/Helsinki";
+
+/** Every new train starts with this join deadline; managers adjust per train. */
+export const DEFAULT_JOIN_BEFORE = "12:15";
 
 /** Who is asking, for train-management authorization (creator-or-admin). */
 export interface Actor {
@@ -64,6 +67,7 @@ export function createService(db: Kysely<DB>, deps: ServiceDeps = {}) {
             date,
             is_default: 1,
             public_id: generateSlug(deps.rng),
+            join_before: DEFAULT_JOIN_BEFORE,
           })
           .execute();
         break;
@@ -208,6 +212,7 @@ export function createService(db: Kysely<DB>, deps: ServiceDeps = {}) {
             is_default: 0,
             created_by: actor.name,
             public_id: generateSlug(deps.rng),
+            join_before: DEFAULT_JOIN_BEFORE,
           })
           .returningAll()
           .executeTakeFirstOrThrow();
@@ -315,6 +320,34 @@ export function createService(db: Kysely<DB>, deps: ServiceDeps = {}) {
       .set({ dictator_name: name })
       .where("id", "=", session.id)
       .execute();
+  }
+
+  /** Sets or clears the train's join deadline. Joining after it stays
+   * allowed — the deadline only drives the late-joiner warning. */
+  async function setJoinBefore(
+    actor: Actor,
+    trainId: string,
+    time: string | null,
+  ) {
+    const session = await requireOpenTrainToday(trainId);
+    requireManager(session, actor);
+    const parsed = time === null ? null : parseTimeHHMM(time);
+    if (time !== null && parsed === null) {
+      throw new LunchError("Use a time like 12:15.");
+    }
+    await db
+      .updateTable("session")
+      .set({ join_before: parsed })
+      .where("id", "=", session.id)
+      .execute();
+  }
+
+  /** True once the train's join deadline has passed. */
+  function departed(session: SessionRow): boolean {
+    return (
+      session.join_before !== null &&
+      timeOfDay(now(), TZ) >= session.join_before
+    );
   }
 
   /** placeId → reason, for places unavailable today (schedule, lunch window, or closure). */
@@ -502,7 +535,12 @@ export function createService(db: Kysely<DB>, deps: ServiceDeps = {}) {
     let myVote: number | null = null;
     for (const session of sessions) {
       const { participants, voteRows, votes } = await sessionState(session.id);
-      trains.push({ session, participants, votes });
+      trains.push({
+        session,
+        participants,
+        votes,
+        departed: departed(session),
+      });
       const riding = participants.some(
         (p) => p.name.toLowerCase() === userName.toLowerCase(),
       );
@@ -1059,6 +1097,7 @@ export function createService(db: Kysely<DB>, deps: ServiceDeps = {}) {
     unvote,
     setMode,
     setDictator,
+    setJoinBefore,
     finalize,
     dictatorPick,
     reopen,

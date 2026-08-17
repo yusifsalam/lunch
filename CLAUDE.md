@@ -46,6 +46,7 @@ The code is layered so domain logic is testable without Astro or a real DB:
 - A train is managed (mode, dictator, finalize, reopen, delete) by its creator or a tenant admin — enforced in the service via `Actor`, not the action layer. The auto-created default train has `created_by NULL`, so it is admin-only. `dictatorPick` stays dictator-gated, not manager-gated.
 - Named trains are member-creatable on weekdays; on weekends only admins, unless a train already exists (weekend force-start). Deleting today's default train resets it (next visit recreates it empty); a deleted named train stays gone. Deleting a tenant cascades its sessions/participants/votes but never place data.
 - Join/leave stay allowed after finalization; only the decision (votes, mode, dictator) locks.
+- Every new train gets a join deadline (`join_before`, default 12:15 Helsinki; manager-adjustable or clearable, so admin-only on the default train). It never blocks anything server-side: the snapshot's per-train `departed` flag drives a client-side warning before a late join (or a vote, which auto-joins).
 - Votes and dictator designation survive a mode switch, making it reversible; finalize reads only current-mode data.
 - A place that was ever a finalized session's outcome can't be deleted, only archived. Archived places are excluded from voting/tallying but stay in history.
 - Reopening a session keeps votes/participants so re-finalizing re-tallies.

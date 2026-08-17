@@ -150,6 +150,19 @@ export const server = {
         );
       },
     }),
+    setJoinBefore: defineAction({
+      input: z.object({
+        trainId,
+        // null clears the deadline; the service parses/normalizes the time
+        time: z.string().trim().min(1).max(10).nullable(),
+      }),
+      handler: async ({ trainId, time }, ctx) => {
+        const user = requireUser(ctx.locals);
+        await run(() =>
+          ctx.locals.service.setJoinBefore(actor(user), trainId, time),
+        );
+      },
+    }),
     dictatorPick: defineAction({
       input: z.object({ trainId, placeId: z.number().int().positive() }),
       handler: async ({ trainId, placeId }, ctx) => {

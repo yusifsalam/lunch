@@ -5,6 +5,7 @@ import { migrate } from "@/db/migrate";
 import type { DB } from "@/db/types";
 import {
   createService,
+  DEFAULT_JOIN_BEFORE,
   LunchError,
   type Actor,
   type Service,
@@ -1241,6 +1242,64 @@ describe("train management authorization", () => {
     );
     await service.deleteSession(ADA, named.public_id);
     expect(await service.sessionDetail(named.public_id)).toBe(null);
+  });
+});
+
+describe("join deadline", () => {
+  const ADA: Actor = { name: "Ada", isAdmin: false };
+  // 13:00 Helsinki — past the 12:15 default deadline (FRIDAY itself is 12:00)
+  const LATE_FRIDAY = new Date("2026-08-14T10:00:00Z");
+
+  it("new trains start with the default deadline", async () => {
+    expect((await defaultTrain())!.join_before).toBe(DEFAULT_JOIN_BEFORE);
+    const named = await service.createTrain(ADA, "Ada's crew");
+    expect(named.join_before).toBe(DEFAULT_JOIN_BEFORE);
+  });
+
+  it("snapshot flags a train as departed once the deadline passes", async () => {
+    await join("Ada");
+    expect((await service.snapshot("Ada")).trains[0]!.departed).toBe(false);
+    const late = makeService(LATE_FRIDAY);
+    expect((await late.snapshot("Ada")).trains[0]!.departed).toBe(true);
+  });
+
+  it("joining and voting stay allowed after the deadline", async () => {
+    const [sushi] = await addPlaces("Sushi");
+    const late = makeService(LATE_FRIDAY);
+    await join("Ada", late);
+    await vote("Bob", sushi!, late);
+    const snap = await late.snapshot("Bob");
+    expect(snap.trains[0]!.participants.map((p) => p.name)).toEqual([
+      "Ada",
+      "Bob",
+    ]);
+  });
+
+  it("a manager sets, normalizes, and clears the deadline", async () => {
+    const named = await service.createTrain(ADA, "Ada's crew");
+    const id = named.public_id;
+    await service.setJoinBefore(ADA, id, "13");
+    expect((await service.sessionDetail(id))!.session.join_before).toBe(
+      "13:00",
+    );
+    await service.setJoinBefore(ADMIN, id, null);
+    expect((await service.sessionDetail(id))!.session.join_before).toBe(null);
+    // No deadline → never departed.
+    const late = makeService(LATE_FRIDAY);
+    const snap = await late.snapshot("Ada");
+    expect(snap.trains.find((t) => t.session.public_id === id)!.departed).toBe(
+      false,
+    );
+  });
+
+  it("rejects non-managers and unparseable times", async () => {
+    const id = await tid();
+    await expect(service.setJoinBefore(ADA, id, "11:00")).rejects.toThrow(
+      /creator or an admin/,
+    );
+    await expect(service.setJoinBefore(ADMIN, id, "25:99")).rejects.toThrow(
+      /like 12:15/,
+    );
   });
 });
 

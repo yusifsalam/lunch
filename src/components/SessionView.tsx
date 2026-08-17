@@ -225,6 +225,10 @@ function TrainSection(props: {
   } = props;
   const { session, participants, votes } = train;
 
+  // Buffers the leaves-at text while it's being typed — the 5s snapshot poll
+  // re-renders and would otherwise clobber the field mid-edit.
+  const [joinBeforeDraft, setJoinBeforeDraft] = useState<string | null>(null);
+
   const isAdmin = user.role === "admin";
   const canManage =
     isAdmin || session.created_by?.toLowerCase() === user.name.toLowerCase();
@@ -239,6 +243,13 @@ function TrainSection(props: {
     votes.find((v) => v.placeId === placeId);
   const chosen = places.find((p) => p.id === session.chosen_place_id);
 
+  /** Joining a departed train works, but only past a warning. */
+  const confirmLateJoin = () =>
+    !train.departed ||
+    confirm(
+      `The ${session.name ?? "lunch"} train already left at ${session.join_before} — hop on late anyway?`,
+    );
+
   return (
     <section
       class={`collapse-arrow bg-base-100 collapse shadow-sm ${isExpanded ? "collapse-open" : "collapse-close"}`}
@@ -252,6 +263,14 @@ function TrainSection(props: {
         <span class="badge badge-primary badge-sm">
           {MODES.find((m) => m.value === session.mode)?.label}
         </span>
+        {open && session.join_before && (
+          <span
+            class={`badge badge-sm ${train.departed ? "badge-warning" : "badge-ghost"}`}
+            title="Join before this time — later still works, with a warning"
+          >
+            ⏰ {train.departed ? "left at" : "leaves"} {session.join_before}
+          </span>
+        )}
         {!open && (
           <span class="badge badge-success badge-sm">
             decided: {placeName(session.chosen_place_id)}
@@ -275,9 +294,10 @@ function TrainSection(props: {
             <button
               class="btn btn-primary btn-xs"
               disabled={busy}
-              onClick={() =>
-                call(() => actions.lunch.join({ trainId: session.public_id }))
-              }
+              onClick={() => {
+                if (!confirmLateJoin()) return;
+                call(() => actions.lunch.join({ trainId: session.public_id }));
+              }}
             >
               {hasTrain
                 ? "Switch to this train"
@@ -356,7 +376,10 @@ function TrainSection(props: {
                       <button
                         class={`btn w-full justify-between ${mine ? "btn-primary" : "btn-ghost bg-base-200"}`}
                         disabled={busy}
-                        onClick={() =>
+                        onClick={() => {
+                          // Voting on another train rides it — warn late
+                          // joiners here too.
+                          if (!mine && !isMine && !confirmLateJoin()) return;
                           call(() =>
                             mine
                               ? actions.lunch.unvote({
@@ -366,8 +389,8 @@ function TrainSection(props: {
                                   trainId: session.public_id,
                                   placeId: place.id,
                                 }),
-                          )
-                        }
+                          );
+                        }}
                       >
                         <span>
                           {place.name}
@@ -553,6 +576,36 @@ function TrainSection(props: {
                     {session.mode === "random" ? "🎲 Decide" : "Finalize"}
                   </button>
                 )}
+                <label
+                  class="flex items-center gap-1 text-sm"
+                  title="Join deadline — later joins still work, with a warning. Clear for none."
+                >
+                  ⏰ leaves
+                  {/* type="text" like the opening-hours inputs — the service
+                      accepts lenient forms ("1215", "12.15") via parseTimeHHMM */}
+                  <input
+                    type="text"
+                    inputmode="numeric"
+                    maxlength={5}
+                    placeholder="12:15"
+                    class="input input-bordered input-sm w-20"
+                    disabled={busy}
+                    value={joinBeforeDraft ?? session.join_before ?? ""}
+                    onInput={(e) => setJoinBeforeDraft(e.currentTarget.value)}
+                    onChange={(e) => {
+                      const time = e.currentTarget.value.trim();
+                      setJoinBeforeDraft(null);
+                      if (time === (session.join_before ?? "")) return;
+                      call(() =>
+                        actions.lunch.setJoinBefore({
+                          trainId: session.public_id,
+                          time: time || null,
+                        }),
+                      );
+                    }}
+                    onBlur={() => setJoinBeforeDraft(null)}
+                  />
+                </label>
                 {session.name && (
                   <button
                     class="btn btn-ghost btn-sm text-error ml-auto"
