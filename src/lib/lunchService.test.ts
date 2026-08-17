@@ -227,6 +227,54 @@ describe("sessionDetail", () => {
   });
 });
 
+describe("deleteSession", () => {
+  it("removes the session with its votes and participants", async () => {
+    const [a] = await addPlaces("Sushi");
+    await service.vote("Ada", a!);
+    await service.join("Bob");
+    await service.finalize();
+    const slug = (await service.getOrCreateToday())!.public_id;
+    await service.deleteSession(slug);
+    expect(await service.sessionDetail(slug)).toBe(null);
+    expect(await db.selectFrom("session").selectAll().execute()).toHaveLength(
+      0,
+    );
+    expect(await db.selectFrom("vote").selectAll().execute()).toHaveLength(0);
+    expect(
+      await db.selectFrom("participant").selectAll().execute(),
+    ).toHaveLength(0);
+  });
+
+  it("rejects unknown slugs", async () => {
+    await expect(service.deleteSession("no-such-slug")).rejects.toThrow(
+      LunchError,
+    );
+  });
+
+  it("deleting today's session resets it — the next visit starts fresh", async () => {
+    const [a] = await addPlaces("Sushi");
+    await service.vote("Ada", a!);
+    await service.finalize();
+    const old = (await service.getOrCreateToday())!;
+    expect(old.status).toBe("finalized");
+    await service.deleteSession(old.public_id);
+    const fresh = (await service.getOrCreateToday())!;
+    expect(fresh.status).toBe("open");
+    expect(fresh.chosen_place_id).toBe(null);
+    expect((await service.snapshot("Ada")).participants).toHaveLength(0);
+  });
+
+  it("frees the chosen place for deletion once its only session is gone", async () => {
+    const [a] = await addPlaces("Sushi");
+    await service.vote("Ada", a!);
+    await service.finalize();
+    await expect(service.deletePlace(a!)).rejects.toThrow(/archive/);
+    await service.deleteSession((await service.getOrCreateToday())!.public_id);
+    await service.deletePlace(a!);
+    expect(await db.selectFrom("place").selectAll().execute()).toHaveLength(0);
+  });
+});
+
 describe("menu", () => {
   it("adds items with an initial price and lists them in the place detail", async () => {
     const [a] = await addPlaces("Sushi Palace");

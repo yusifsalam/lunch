@@ -143,6 +143,14 @@ export const server = {
         await run(() => service.forceStartToday());
       },
     }),
+    deleteSession: defineAction({
+      accept: "form",
+      input: z.object({ publicId: z.string().trim().min(1).max(40) }),
+      handler: async ({ publicId }, ctx) => {
+        requireAdmin(ctx.locals);
+        await run(() => service.deleteSession(publicId));
+      },
+    }),
   },
   menu: {
     addItem: defineAction({

@@ -27,9 +27,7 @@ const user = Astro.locals.user;
           <span class="text-base-content/70 text-sm max-sm:hidden">
             {user.name}
             {user.role === "admin" && (
-              <span class="badge badge-warning badge-xs ml-1">
-                admin
-              </span>
+              <span class="badge badge-warning badge-xs ml-1">admin</span>
             )}
           </span>
           <form method="POST" action="/api/logout">

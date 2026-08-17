@@ -707,6 +707,19 @@ export function createService(db: Kysely<DB>, deps: ServiceDeps = {}) {
       .execute();
   }
 
+  /** Admin: permanently removes a session. Participants and votes cascade
+   * (FK ON DELETE CASCADE; migrate.ts turns the pragma on). Deleting today's
+   * session resets it — the next visit lazily recreates it empty. */
+  async function deleteSession(publicId: string) {
+    const session = await db
+      .selectFrom("session")
+      .select("id")
+      .where("public_id", "=", publicId)
+      .executeTakeFirst();
+    if (!session) throw new LunchError("That session doesn't exist.");
+    await db.deleteFrom("session").where("id", "=", session.id).execute();
+  }
+
   async function history(limit = 30) {
     return db
       .selectFrom("session")
@@ -737,6 +750,7 @@ export function createService(db: Kysely<DB>, deps: ServiceDeps = {}) {
     reopen,
     snapshot,
     sessionDetail,
+    deleteSession,
     placeDetail,
     addMenuItem,
     recordPrice,
