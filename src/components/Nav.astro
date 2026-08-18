@@ -5,32 +5,89 @@ import ThemeToggle from "./ThemeToggle.astro";
 const user = Astro.locals.user;
 const tenant = Astro.locals.tenant;
 const isSuperadmin = user?.role === "superadmin";
+
+const links = isSuperadmin
+  ? [{ href: "/tenants", label: "Tenants" }]
+  : [
+      { href: "/", label: "Today" },
+      { href: "/places", label: "Places" },
+      { href: "/map", label: "Map" },
+      { href: "/history", label: "History" },
+      { href: "/about", label: "About" },
+    ];
+
+const path = Astro.url.pathname;
+const isActive = (href: string) =>
+  href === "/" ? path === "/" : path.startsWith(href);
 ---
 
 {
   user && (
     <nav class="border-base-300 bg-base-100/80 sticky top-0 z-30 border-b backdrop-blur">
-      <div class="mx-auto flex h-14 w-full max-w-3xl items-center gap-4 px-4">
+      <div class="mx-auto flex h-14 w-full max-w-3xl items-center gap-2 px-4 sm:gap-4">
+        <div class="dropdown sm:hidden">
+          <div
+            tabindex="0"
+            role="button"
+            class="btn btn-ghost btn-square btn-sm -ml-2"
+            aria-label="Menu"
+          >
+            <svg
+              class="h-5 w-5"
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+            >
+              <path d="M4 6h16M4 12h16M4 18h16" />
+            </svg>
+          </div>
+          <ul
+            tabindex="0"
+            class="dropdown-content menu bg-base-100 border-base-300 rounded-box z-40 mt-3 w-48 border p-2 shadow-lg"
+          >
+            {links.map((l) => (
+              <li>
+                <a
+                  href={l.href}
+                  class={isActive(l.href) ? "menu-active" : undefined}
+                  aria-current={isActive(l.href) ? "page" : undefined}
+                >
+                  {l.label}
+                </a>
+              </li>
+            ))}
+            <li class="menu-title border-base-300 mt-1 border-t pt-2">
+              {user.name}
+              {user.role === "admin" && (
+                <span class="badge badge-warning badge-xs ml-1">admin</span>
+              )}
+              {isSuperadmin && (
+                <span class="badge badge-error badge-xs ml-1">superadmin</span>
+              )}
+              {tenant && (
+                <span class="badge badge-ghost badge-xs ml-1">
+                  {tenant.name}
+                </span>
+              )}
+            </li>
+          </ul>
+        </div>
         <a
           href={isSuperadmin ? "/tenants" : "/"}
           class="flex shrink-0 items-center gap-1.5 font-semibold tracking-tight"
         >
           <span aria-hidden="true">🍽️</span>
-          <span class="max-sm:hidden">Lunch</span>
+          <span>Lunch</span>
         </a>
-        <div class="flex h-full flex-1 items-center gap-1">
-          {isSuperadmin ? (
-            <NavLink href="/tenants">Tenants</NavLink>
-          ) : (
-            <>
-              <NavLink href="/">Today</NavLink>
-              <NavLink href="/places">Places</NavLink>
-              <NavLink href="/map">Map</NavLink>
-              <NavLink href="/history">History</NavLink>
-              <NavLink href="/about">About</NavLink>
-            </>
-          )}
+        <div class="hidden h-full flex-1 items-center gap-1 sm:flex">
+          {links.map((l) => (
+            <NavLink href={l.href}>{l.label}</NavLink>
+          ))}
         </div>
+        <div class="flex-1 sm:hidden" />
         <div class="flex shrink-0 items-center gap-3">
           <ThemeToggle />
           <span class="text-base-content/70 text-sm max-sm:hidden">
